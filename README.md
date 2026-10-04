@@ -36,6 +36,11 @@ To try the study assistant locally, make `.dev.vars` with `GEMINI_API_KEY=...` a
 
 Get the AI keys at aistudio.google.com and console.groq.com/keys. Never put them in `src/`.
 
+## Welcome tour
+New accounts get a hands-on tour the first time they sign in. It lights up the real buttons and waits for the student to use them: tick a practice task, open it, set its progress, add a task, switch views, open Review and Ask, and search. The practice task is never saved and nobody else sees it. Students can replay the tour any time from the account menu ("Take the tour again"), and Esc ends it.
+
+The tour lives in the `Tour` component in `src/App.jsx`. To change a step, edit the `tourSteps` list just above it. To point a step at another control, add `data-tour="some-name"` to that control and use the same name as the step's `target`.
+
 ## Keyboard
 N = new task, / or Ctrl+K = search, Esc = close.
 

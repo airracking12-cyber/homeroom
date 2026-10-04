@@ -198,6 +198,13 @@ async function copyText(text) {
 
 /* ───────────────────────── sound: effects and a little generative lo-fi, all synthesized ───────────────────────── */
 
+// A tiny haptic tick on phones when you press the main controls. Silently ignored where unsupported.
+if (typeof document !== "undefined" && navigator.vibrate) {
+  document.addEventListener("pointerdown", (e) => {
+    if (e.pointerType === "touch" && e.target.closest?.(".btn,.check,.chip,.fab,.tab,.nav")) navigator.vibrate(6);
+  }, { passive: true });
+}
+
 const Sound = (() => {
   let ctx = null, master = null, musicBus = null, noise = null;
   let sfxOn = true, musicOn = false, vol = 0.5, timer = null, step = 0, nextTime = 0;
@@ -821,21 +828,48 @@ textarea.input{resize:vertical;min-height:84px;line-height:1.45}
 .skL{height:13px;margin-bottom:9px}
 .skL.s{height:10px;margin-bottom:0}
 
-/* ── welcome tour ── */
-.intro{flex:1;display:flex;flex-direction:column;padding:26px 28px calc(24px + env(safe-area-inset-bottom));overflow-y:auto}
-.introTop{display:flex;align-items:baseline;gap:10px}
-.introMid{flex:1;display:flex;flex-direction:column;justify-content:center;animation:lift .5s var(--ease) both;min-height:0}
-.introIcon{width:68px;height:68px;border-radius:22px;background:var(--accent-soft);display:grid;place-items:center;color:var(--accent);margin-bottom:26px}
-.mono{width:68px;height:68px;border-radius:22px;background:var(--paper);box-shadow:var(--shadow);font-family:${SERIF};font-size:25px;display:grid;place-items:center;margin-bottom:26px}
-.introH{font-family:${SERIF};font-size:33px;line-height:1.15;letter-spacing:-.025em;font-weight:400;margin:0 0 14px}
-.introBody{font-family:${SERIF};font-size:18px;line-height:1.6;color:var(--body);margin:0}
-.introSmall{font-size:13.5px;color:var(--faint);margin:16px 0 0}
-.introFoot{padding-top:16px}
-.introDots{display:flex;gap:6px;justify-content:center;margin-bottom:16px}
-.introDots i{width:6px;height:6px;border-radius:50%;background:var(--line);transition:background .3s,width .4s var(--ease)}
-.introDots i.on{background:var(--accent);width:20px;border-radius:3px}
-.introPow{display:flex;align-items:center;justify-content:center;gap:7px;font-size:12.5px;color:var(--faint);margin:16px 0 0}
+/* ── interactive tour ── */
+.tour{position:fixed;inset:0;z-index:90;pointer-events:none}
+.tourBlock{position:fixed;pointer-events:auto}
+.tourHole{position:fixed;pointer-events:none;box-shadow:0 0 0 100vmax rgba(24,16,9,.62);transition:left .6s var(--ease),top .6s var(--ease),width .6s var(--ease),height .6s var(--ease),border-radius .6s var(--ease)}
+.tourHole::after{content:"";position:absolute;inset:-5px;border-radius:inherit;border:2px solid var(--accent);animation:tourPulse 1.9s ease-out infinite}
+.tourHole[data-none="1"]::after{display:none}
+.tourHole[data-ok="1"]::after{border-color:var(--ok);animation:tourOk .85s var(--ease) both}
+.tourCard{position:fixed;pointer-events:auto;background:var(--paper);color:var(--ink);border:1px solid var(--line);border-radius:24px;padding:20px 22px 16px;box-shadow:var(--shadow-lg);transition:left .6s var(--ease),top .6s var(--ease)}
+.tourCard.center{padding:30px 30px 22px;border-radius:30px}
+.tour.settled .tourHole,.tour.settled .tourCard{transition:none}
+.tourBody{animation:lift .5s var(--ease) both;position:relative}
+.tourH{font-family:${SERIF};font-weight:400;font-size:22px;line-height:1.2;letter-spacing:-.02em;margin:0 28px 8px 0;text-wrap:balance}
+.tourCard.center .tourH{font-size:31px;line-height:1.12;letter-spacing:-.028em;margin-right:0}
+.tourP{margin:0;color:var(--body);font-size:14.5px;line-height:1.55}
+.tourCard.center .tourP{font-family:${SERIF};font-size:17px;line-height:1.6}
+.tourCredit{margin:14px 0 0;font-size:13px;color:var(--faint)}
+.tourDo{display:flex;align-items:center;gap:9px;margin-top:14px;font-size:13.5px;font-weight:600;color:var(--accent)}
+.tourDo.ok{color:var(--ok);animation:pop .45s var(--spring) both}
+.tapDot{position:relative;width:10px;height:10px;border-radius:50%;background:var(--accent);flex:none}
+.tapDot::after{content:"";position:absolute;inset:-5px;border-radius:50%;border:2px solid var(--accent);animation:tourPulse 1.4s ease-out infinite}
+.tourFoot{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-top:18px}
+.tourLink{background:none;border:0;padding:8px 2px;font-size:14px;color:var(--muted);transition:color .2s}
+@media (hover:hover){.tourLink:hover{color:var(--ink)}}
+.tourDots{display:flex;gap:5px;align-items:center}
+.tourDots i{width:6px;height:6px;border-radius:3px;background:var(--line);transition:width .45s var(--ease),background .3s}
+.tourDots i.past{background:var(--accent-line)}
+.tourDots i.on{width:18px;background:var(--accent)}
+.tourX{position:absolute;top:12px;right:12px;width:30px;height:30px;border-radius:50%;border:0;background:none;color:var(--faint);display:grid;place-items:center;padding:0;transition:background .2s,color .2s}
+@media (hover:hover){.tourX:hover{background:var(--wash);color:var(--ink)}}
+.tourArrow{position:absolute;width:16px;height:16px;background:var(--paper);border:1px solid var(--line);transform:rotate(45deg)}
+.tourArrow[data-side="below"]{top:-9px;border-width:1px 0 0 1px}
+.tourArrow[data-side="above"]{bottom:-9px;border-width:0 1px 1px 0}
+.tourArrow[data-side="right"]{left:-9px;border-width:0 0 1px 1px}
+.introIcon{width:64px;height:64px;border-radius:22px;background:var(--accent-soft);display:grid;place-items:center;color:var(--accent)}
+.mono{width:64px;height:64px;border-radius:22px;background:var(--paper);box-shadow:var(--shadow);font-family:${SERIF};font-size:28px;display:grid;place-items:center}
 .burst path{stroke-dasharray:1;animation:bdraw .7s ease-out both}
+.tourCard.center .introIcon,.tourCard.center .mono{margin-bottom:22px}
+.confetti{position:absolute;left:34px;top:34px;width:0;height:0;pointer-events:none}
+.confetti i{position:absolute;left:-4px;top:-6px;width:8px;height:12px;border-radius:2px;animation:scrap 1.3s cubic-bezier(.2,.7,.3,1) both}
+@keyframes tourPulse{0%{transform:scale(1);opacity:.9}75%,100%{transform:scale(1.12);opacity:0}}
+@keyframes tourOk{from{transform:scale(1);opacity:1}to{transform:scale(1.28);opacity:0}}
+@media (max-width:519px){.tourCard.center{padding:26px 22px 18px}.tourCard.center .tourH{font-size:27px}}
 
 /* ── photo proof + groups ── */
 .pgrid{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin:0 0 12px}
@@ -941,8 +975,6 @@ textarea.input{resize:vertical;min-height:84px;line-height:1.45}
 .authCard{width:100%;max-width:440px;animation:lift .7s var(--ease) both}
 .authBody{display:flex;flex-direction:column}
 .authBody .btn.accent{margin-top:4px}
-.intro{padding:0;min-height:460px;overflow:visible}
-.intro .introMid{padding:18px 0}
 @media (min-width:760px) and (max-width:1099px){
   .authForm{padding:56px}
   .authCard{max-width:540px;background:color-mix(in srgb,var(--paper) 88%,transparent);backdrop-filter:blur(18px);border:1px solid var(--line);border-radius:36px;padding:50px 50px 42px;box-shadow:var(--shadow-lg)}
@@ -1010,14 +1042,12 @@ textarea.input{resize:vertical;min-height:84px;line-height:1.45}
 @keyframes shake{0%,100%{transform:none}20%{transform:translateX(-6px)}40%{transform:translateX(5px)}60%{transform:translateX(-3px)}80%{transform:translateX(2px)}}
 .err[role="alert"]{animation:shake .38s}
 
-/* ── welcome tour motion: unpack, open the book, stamp the name ── */
+/* ── tour motion: unpack, stamp ── */
 .ico0{position:relative;overflow:visible;animation:unbox .7s var(--spring) both}
 .ico0 .scrap{top:50%;margin-top:-6px}
-.ico1{transform-origin:0 50%;animation:bookOpen .6s var(--ease) both}
 .ico2{position:relative;animation:stampDown .5s var(--ease) both}
 .ico2::after{content:"";position:absolute;inset:-4px;border-radius:26px;border:2px solid var(--accent);animation:ripple .7s .3s ease-out both}
 @keyframes unbox{from{transform:scale(.4) rotate(-20deg);opacity:0}60%{transform:scale(1.12) rotate(6deg);opacity:1}to{transform:none;opacity:1}}
-@keyframes bookOpen{from{transform:perspective(300px) rotateY(-85deg);opacity:0}to{transform:none;opacity:1}}
 @keyframes stampDown{0%{transform:translateY(-26px) scale(1.8) rotate(-12deg);opacity:0}60%{transform:scale(.9) rotate(-3deg);opacity:1}80%{transform:scale(1.04) rotate(-3deg)}100%{transform:rotate(-3deg);opacity:1}}
 
 /* ── motion ── */
@@ -1033,6 +1063,49 @@ textarea.input{resize:vertical;min-height:84px;line-height:1.45}
 @keyframes sweep{from{background-position:-40% 0}to{background-position:140% 0}}
 @keyframes blink{0%,80%,100%{opacity:.25}40%{opacity:1}}
 @keyframes bdraw{from{stroke-dashoffset:1}to{stroke-dashoffset:0}}
+/* ── polish layer: depth, calm hover lift, satisfying press ── */
+.hr{--lift:0 10px 28px -12px rgba(60,45,20,.28),0 2px 6px rgba(60,45,20,.05)}
+.hr[data-theme="dark"]{--lift:0 12px 30px -12px rgba(0,0,0,.65),0 2px 6px rgba(0,0,0,.3)}
+.row,.card,.stat,.btn,.chip,.fab,.tab,.nav,.hdrBtn,.avatar{will-change:transform}
+.row{transition:transform .35s var(--spring),box-shadow .3s var(--ease),border-color .25s,background .25s}
+.row:active{transform:scale(.988)}
+@media (hover:hover){
+  .row:hover{transform:translateY(-2px);box-shadow:var(--lift)}
+  .card:hover,.stat:hover{transform:translateY(-2px);box-shadow:var(--lift);border-color:var(--accent-line)}
+  .fab:hover{transform:translateY(-3px) scale(1.04);box-shadow:0 18px 36px -10px color-mix(in srgb,var(--accent) 70%,transparent)}
+}
+.card,.stat{transition:transform .4s var(--spring),box-shadow .35s var(--ease),border-color .25s}
+.btn.accent{box-shadow:0 8px 20px -8px color-mix(in srgb,var(--accent) 75%,transparent),inset 0 1px 0 rgba(255,255,255,.22)}
+.btn.accent:not(:disabled):active{transform:scale(.96);box-shadow:0 3px 8px -4px color-mix(in srgb,var(--accent) 75%,transparent),inset 0 1px 0 rgba(255,255,255,.22)}
+.btn:not(:disabled):active,.chip:active,.tab:active,.hdrBtn:active{transition-duration:.12s}
+.check[data-s="done"]{box-shadow:0 0 0 5px var(--accent-soft),0 4px 12px -4px color-mix(in srgb,var(--accent) 70%,transparent)}
+.check{transition:background .25s var(--ease),border-color .25s,transform .3s var(--spring),box-shadow .35s var(--ease)}
+.chip[aria-pressed="true"]{transform:translateY(-1px);box-shadow:0 0 0 1px var(--ink) inset,0 6px 14px -8px rgba(0,0,0,.35)}
+.input{transition:border-color .2s,box-shadow .3s var(--ease),transform .3s var(--spring)}
+.input:focus{transform:translateY(-1px)}
+.tabs{box-shadow:0 18px 40px -16px rgba(40,30,10,.4),0 0 0 1px var(--line)}
+.sheet{animation-timing-function:var(--spring)}
+.toast{box-shadow:0 18px 40px -14px rgba(0,0,0,.5)}
+.h1{background:linear-gradient(180deg,var(--ink) 55%,color-mix(in srgb,var(--ink) 70%,var(--accent)));-webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent}
+.scroll{scroll-padding-top:12px}
+/* ── v2 polish: calmer notes, clearer due dates, tighter phone hero ── */
+.note{background:var(--paper);border:1px solid var(--line);border-left:3px solid var(--accent);box-shadow:var(--shadow-sm)}
+.note p span{color:var(--accent)}
+.due{display:inline-block;padding:2px 10px;border-radius:999px;font-size:12.5px;font-weight:550;color:var(--muted);background:var(--wash);transition:background .3s var(--ease),color .3s}
+.due[data-tone="late"]{background:var(--errbg);color:var(--danger)}
+.due[data-tone="today"]{background:var(--accent-soft);color:var(--accent)}
+.due[data-tone="done"]{background:none;color:var(--faint);padding-right:0}
+.rowRight{display:flex;flex-direction:column;align-items:flex-end;gap:5px}
+.rowRight .pri{margin-top:0}
+.group h3 small{background:var(--wash);border-radius:999px;padding:1px 9px;color:var(--muted);font-weight:500}
+.group>h3{padding-bottom:2px}
+.practice{color:var(--accent);font-weight:600}
+@media (max-width:519px){
+  .heroCard{padding:18px 18px 18px 20px;gap:10px;border-radius:26px}
+  .heroCard .h1{font-size:28px;line-height:1.1}
+  .heroDate{font-size:11.5px}
+  .stats{gap:8px}
+}
 @media (prefers-reduced-motion:reduce){
   .hr *,.hr *::before,.hr *::after{animation-duration:.01ms!important;animation-delay:0s!important;animation-iteration-count:1!important;transition-duration:.01ms!important;scroll-behavior:auto!important}
   .squig path,.burst path{stroke-dashoffset:0}
@@ -1156,10 +1229,10 @@ function Sheet({ open, onClose, title, children }) {
   );
 }
 
-function Segmented({ value, options, onChange }) {
+function Segmented({ value, options, onChange, tour }) {
   const [ref, slider] = useSlider(value + "|" + options.map((o) => (Array.isArray(o) ? o[1] : o)).join("|"));
   return (
-    <div className="seg" role="group" ref={ref}>
+    <div className="seg" role="group" ref={ref} data-tour={tour}>
       {slider}
       {options.map((o) => {
         const [v, l] = Array.isArray(o) ? o : [o, o];
@@ -1207,64 +1280,270 @@ function Starburst({ size = 44 }) {
   );
 }
 
-/* NEW — first-run welcome tour, shown once to brand-new accounts */
-function Intro({ user, classLabel, onDone }) {
-  const [step, setStep] = useState(0);
-  const steps = [
-    {
-      icon: (
-        <div className="introIcon ico0">
-          <Starburst size={42} />
-          {Array.from({ length: 8 }, (_, i) => {
-            const a = (i * Math.PI) / 4;
-            return <i key={i} className="scrap" style={{ "--x": Math.round(Math.cos(a) * 64) + "px", "--y": Math.round(Math.sin(a) * 64) + "px", "--r": (i * 53) % 360 + "deg", animationDelay: "250ms" }} />;
-          })}
-        </div>
-      ),
-      title: "Welcome to Homeroom.",
-      body: "This is your class's shared list. Everything that's due — homework, quizzes, exams — lives here, added by anyone and seen by everyone. You check off your own work, and the class sees how many people have finished.",
-    },
-    {
-      icon: <div className="introIcon ico1"><BookOpen size={24} /></div>,
-      title: "It also helps you study.",
-      body: "Open any task to share notes — paste text or upload a PDF or a photo, and the assistant turns it into clean study notes. Make reviewers, practice quizzes and flashcards, or ask what's due and let it plan your evening.",
-    },
-    {
-      icon: <div className="mono ico2">NV</div>,
-      title: "Made by Nathaniel Visaya.",
-      body: "Built for this class so nobody misses a deadline. Finish your tasks, share your notes, and good luck out there.",
-    },
-  ];
+/* ───────────────────────── interactive tour ─────────────────────────
+   A hands-on walk through the real app. Each step lights up a real control and waits for you to use it.
+   A practice task (never saved, never shown to the class) is added to the list while the tour runs. */
+
+const DEMO_ID = "tour-demo";
+const makeDemoTask = () => ({
+  id: DEMO_ID, title: "Practice task: tick the circle", subject: "Mathematics", type: "Quiz", priority: "High",
+  deadline: todayISO(), notes: "This one is just for the tour. It isn't saved, and nobody else can see it.",
+  addedBy: "sample", quarter: 1, createdAt: 0,
+});
+
+// Phone and desktop each draw their own copy of some controls, so pick the one that is on screen.
+const findTourTarget = (name) =>
+  [...document.querySelectorAll(`[data-tour~="${name}"]`)].find((el) => {
+    const r = el.getBoundingClientRect();
+    return r.width > 0 && r.height > 0;
+  }) || null;
+
+const tourSteps = (bp, user) => [
+  {
+    id: "hello", center: true, enter: { demo: "todo" },
+    title: `Welcome to Homeroom, ${user}.`,
+    body: "This is your class's shared list. Let's try it for real. It takes about a minute, and you'll tap everything yourself.",
+  },
+  {
+    id: "tick", target: "practice-check", enter: { demo: "todo" },
+    title: "Check off a task",
+    body: "Tap the circle when you finish something. Your classmates see how many people have finished each task.",
+    hint: "Tap the circle", done: (c) => c.demo === "done",
+  },
+  {
+    id: "open", target: "practice-row", enter: {},
+    title: "Open a task",
+    body: "Tap a task to see its notes, comments, and who in your class has already finished it.",
+    hint: "Tap the task", done: (c) => c.detail,
+  },
+  {
+    id: "status", target: "detail-status", enter: { detail: true },
+    title: "Not started, in progress, done",
+    body: "Mark where you are, not just when you're finished. Set this one to In progress.",
+    hint: "Tap In progress", done: (c) => c.demo === "progress",
+  },
+  {
+    id: "add", target: "new-task", enter: {},
+    title: "Add something for the class",
+    body: "Anyone can add a task, and everyone in your class sees it. Open the form.",
+    hint: bp === "phone" ? "Tap the plus button" : "Click New task", done: (c) => c.form,
+  },
+  {
+    id: "quick", target: "quick-add", enter: { form: true },
+    title: "Type it like a text",
+    body: "Write something like \u201Cmath quiz friday, chapter 2\u201D and tap the sparkle. The assistant fills in the subject, type, and date.",
+    hint: "Try it, or tap Next",
+  },
+  {
+    id: "views", target: "view-toggle", enter: {},
+    title: "See the week your way",
+    body: bp === "phone" ? "Switch to the calendar to see everything laid out by day." : "Switch to the calendar to see everything by day. The third button is a board you can drag cards across.",
+    hint: "Tap the calendar", done: (c) => c.mode === "calendar",
+  },
+  {
+    id: "review", target: "tab-review", enter: {},
+    title: "Study without the stress",
+    body: "Review turns shared notes into reviewers, practice quizzes, and flashcards.",
+    hint: "Open Review", done: (c) => c.tab === "review",
+  },
+  {
+    id: "ask", target: "tab-ask", enter: { tab: "review" },
+    title: "Ask the assistant",
+    body: "Ask what's due, get a plan for tonight, or tell it to add a task for you.",
+    hint: "Open Ask", done: (c) => c.tab === "ask",
+  },
+  {
+    id: "search", target: "search", enter: {},
+    title: "Find anything fast",
+    body: bp === "phone" ? "Search every task and note your class has shared." : "Search every task and note your class has shared. Press / or Ctrl K from anywhere.",
+    hint: bp === "phone" ? "Tap the magnifier" : "Click the search bar", done: (c) => c.search,
+  },
+  {
+    id: "end", center: true, enter: {},
+    title: `You're all set, ${user}.`,
+    body: "Tick things off, add what's due, and help your class stay ahead. You can replay this tour from your account menu.",
+  },
+];
+
+function Tour({ user, bp, ctx, go, onDone }) {
+  const steps = useMemo(() => tourSteps(bp, user), [bp, user]);
+  const [i, setI] = useState(0);
+  const step = steps[i];
+  const last = steps.length - 1;
+  const [rect, setRect] = useState(null);
+  const [ok, setOk] = useState(false);
+  const [settled, setSettled] = useState(false); // after the glide to a new target, stick to it with no lag
+  const [cardH, setCardH] = useState(230);
+  const [vp, setVp] = useState({ w: window.innerWidth, h: window.innerHeight });
+  const cardRef = useRef(null);
+  const armed = useRef(false);
+  const timer = useRef(null);
+  const ctxRef = useRef(ctx); ctxRef.current = ctx;
+  const goRef = useRef(go); goRef.current = go;
+
+  const toStep = (n) => {
+    clearTimeout(timer.current);
+    setI(Math.max(0, Math.min(last, n)));
+  };
+
+  // entering a step puts the app in the state the step needs (so Back and Skip always work)
   useEffect(() => {
-    if (step === 0) Sound.play("pop");
-    if (step === 1) Sound.play("whoosh");
-    const id = step === 2 ? setTimeout(() => Sound.play("stamp"), 300) : null;
-    return () => clearTimeout(id);
-  }, [step]);
-  const next = () => { Sound.play("tap"); step < steps.length - 1 ? setStep(step + 1) : onDone(); };
+    goRef.current(step.enter);
+    setOk(false); setSettled(false);
+    armed.current = false;
+    const t2 = setTimeout(() => setSettled(true), 800);
+    Sound.play(step.center ? "pop" : "whoosh");
+    if (i === last) { Sound.play("stamp"); setTimeout(() => Sound.play("bell"), 260); }
+    // arm once the app has settled, so a step that is already satisfied can't skip itself
+    const t = setTimeout(() => { armed.current = !!step.done && !step.done(ctxRef.current); }, 90);
+    return () => { clearTimeout(t); clearTimeout(t2); };
+  }, [i]);
+
+  // when the person does the thing, celebrate and move on
+  useEffect(() => {
+    if (!armed.current || !step.done || !step.done(ctx)) return;
+    armed.current = false;
+    setOk(true);
+    Sound.play("done");
+    timer.current = setTimeout(() => toStep(i + 1), 900);
+  }, [ctx.tab, ctx.detail, ctx.form, ctx.mode, ctx.search, ctx.demo, i]);
+
+  useEffect(() => () => clearTimeout(timer.current), []);
+
+  // follow the target, even while a sheet slides in or the page scrolls
+  useEffect(() => {
+    if (!step.target) { setRect(null); return; }
+    let raf, key = "", scrolled = false;
+    const t0 = performance.now();
+    const tick = () => {
+      const el = findTourTarget(step.target);
+      let next = null;
+      if (el) {
+        const r = el.getBoundingClientRect();
+        const vh = window.innerHeight, vw = window.innerWidth;
+        if (r.bottom > 0 && r.top < vh && r.right > 0 && r.left < vw) {
+          const rad = getComputedStyle(el).borderTopLeftRadius;
+          next = { x: r.left, y: r.top, w: r.width, h: r.height, rad: rad.includes("%") ? Math.min(r.width, r.height) / 2 : parseFloat(rad) || 0 };
+        }
+        if (!scrolled && performance.now() - t0 > 350) {
+          scrolled = true;
+          if (el.closest(".scroll") && (r.top < 90 || r.bottom > vh - 120)) el.scrollIntoView({ block: "center", behavior: "smooth" });
+        }
+      }
+      const k = next ? [next.x, next.y, next.w, next.h].map(Math.round).join() : "";
+      if (k !== key) { key = k; setRect(next); }
+      raf = requestAnimationFrame(tick);
+    };
+    tick();
+    return () => cancelAnimationFrame(raf);
+  }, [i]);
+
+  useEffect(() => {
+    const onResize = () => setVp({ w: window.innerWidth, h: window.innerHeight });
+    const onKey = (e) => { if (e.key === "Escape") { e.stopImmediatePropagation(); onDone(); } };
+    window.addEventListener("resize", onResize);
+    window.addEventListener("keydown", onKey, true);
+    return () => { window.removeEventListener("resize", onResize); window.removeEventListener("keydown", onKey, true); };
+  }, [onDone]);
+
+  useLayoutEffect(() => {
+    const h = cardRef.current ? cardRef.current.offsetHeight : 0;
+    if (h && Math.abs(h - cardH) > 1) setCardH(h);
+  });
+
+  /* ---- where things go ---- */
+  const PAD = step.center ? 0 : 8, GAP = 16, M = 14;
+  const cw = Math.min(step.center ? 420 : 350, vp.w - M * 2);
+  const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+  const hole = rect && !step.center
+    ? { x: rect.x - PAD, y: rect.y - PAD, w: rect.w + PAD * 2, h: rect.h + PAD * 2, r: Math.max(rect.rad, 10) + PAD * 0.6 }
+    : { x: vp.w / 2, y: vp.h * 0.46, w: 0, h: 0, r: 0 };
+  let card = { left: (vp.w - cw) / 2, top: Math.max(M, (vp.h - cardH) / 2), side: "none", arrow: 0 };
+  if (rect && !step.center) {
+    const cx = hole.x + hole.w / 2, cy = hole.y + hole.h / 2;
+    const below = vp.h - (hole.y + hole.h) - GAP - M, above = hole.y - GAP - M, right = vp.w - (hole.x + hole.w) - GAP - M;
+    if (bp !== "phone" && hole.x < 260 && right >= cw) {
+      card = { left: hole.x + hole.w + GAP, top: clamp(cy - cardH / 2, M, vp.h - cardH - M), side: "right", arrow: 0 };
+      card.arrow = clamp(cy - card.top, 24, cardH - 24);
+    } else if (below >= cardH || below >= above) {
+      const left = clamp(cx - cw / 2, M, vp.w - cw - M);
+      card = { left, top: Math.min(hole.y + hole.h + GAP, vp.h - cardH - M), side: "below", arrow: clamp(cx - left, 26, cw - 26) };
+    } else {
+      const left = clamp(cx - cw / 2, M, vp.w - cw - M);
+      card = { left, top: Math.max(M, hole.y - GAP - cardH), side: "above", arrow: clamp(cx - left, 26, cw - 26) };
+    }
+  }
+  const blocks = rect && !step.center
+    ? [
+        { left: 0, top: 0, width: vp.w, height: Math.max(0, hole.y) },
+        { left: 0, top: hole.y + hole.h, width: vp.w, height: Math.max(0, vp.h - hole.y - hole.h) },
+        { left: 0, top: hole.y, width: Math.max(0, hole.x), height: hole.h },
+        { left: hole.x + hole.w, top: hole.y, width: Math.max(0, vp.w - hole.x - hole.w), height: hole.h },
+      ]
+    : [{ left: 0, top: 0, width: vp.w, height: vp.h }];
+
+  const interactive = !!step.done;
+  const confetti = ["var(--accent)", "#E3AE46", "#6BA3D1", "#8B6B86", "#5F8B6D"];
+
   return (
-    <div className="intro">
-      <div className="introTop">
-        <span className="mark" style={{ fontSize: 20 }}>Homeroom</span>
-        {classLabel && <span className="meta">{classLabel}</span>}
-      </div>
-      <div className="introMid" key={step}>
-        {steps[step].icon}
-        <h1 className="introH">{steps[step].title}</h1>
-        <p className="introBody">{steps[step].body}</p>
-        {step === 0 && <p className="introSmall">Signed in as {user}.</p>}
-      </div>
-      <div className="introFoot">
-        <div className="introDots" aria-label={`Step ${step + 1} of ${steps.length}`}>
-          {steps.map((_, i) => <i key={i} className={i === step ? "on" : ""} />)}
+    <div className={settled ? "tour settled" : "tour"} role="presentation">
+      {blocks.map((b, k) => <div key={k} className="tourBlock" style={b} />)}
+      <div className="tourHole" data-ok={ok ? 1 : 0} data-none={!rect || step.center ? 1 : 0}
+        style={{ left: hole.x, top: hole.y, width: hole.w, height: hole.h, borderRadius: hole.r }} />
+      <div className={step.center ? "tourCard center" : "tourCard"} ref={cardRef} role="dialog" aria-label="Homeroom tour" aria-live="polite"
+        style={{ left: card.left, top: card.top, width: cw }}>
+        {card.side !== "none" && <i className="tourArrow" data-side={card.side} style={card.side === "right" ? { top: card.arrow - 8 } : { left: card.arrow - 8 }} />}
+        <div className="tourBody" key={i}>
+          {i === 0 && (
+            <div className="introIcon ico0">
+              <Starburst size={42} />
+              {Array.from({ length: 8 }, (_, k) => {
+                const a = (k * Math.PI) / 4;
+                return <i key={k} className="scrap" style={{ "--x": Math.round(Math.cos(a) * 70) + "px", "--y": Math.round(Math.sin(a) * 70) + "px", "--r": (k * 53) % 360 + "deg", animationDelay: "250ms" }} />;
+              })}
+            </div>
+          )}
+          {i === last && (
+            <>
+              <div className="mono ico2">H</div>
+              <div className="confetti" aria-hidden="true">
+                {Array.from({ length: 22 }, (_, k) => {
+                  const a = (k / 22) * Math.PI * 2 + 0.3, d = 90 + ((k * 37) % 70);
+                  return <i key={k} style={{ "--x": Math.round(Math.cos(a) * d) + "px", "--y": Math.round(Math.sin(a) * d * 0.8 - 30) + "px", "--r": ((k * 67) % 360) + "deg", background: confetti[k % confetti.length], animationDelay: (k % 5) * 45 + 300 + "ms" }} />;
+                })}
+              </div>
+            </>
+          )}
+          <h3 className="tourH">{step.title}</h3>
+          <p className="tourP">{step.body}</p>
+          {step.id === "end" && <p className="tourCredit">Made by Nathaniel Visaya for this class.</p>}
+          {interactive && (
+            ok
+              ? <div className="tourDo ok"><Check size={15} strokeWidth={3} />Nice</div>
+              : <div className="tourDo"><i className="tapDot" />{step.hint}</div>
+          )}
+          {!interactive && step.hint && <div className="tourDo"><i className="tapDot" />{step.hint}</div>}
         </div>
-        <button className="btn accent full" onClick={next}>{step < steps.length - 1 ? "Continue" : "Get started"}</button>
-        <div style={{ display: "flex", justifyContent: step === 0 ? "center" : "space-between", marginTop: 6 }}>
-          {step > 0 && <button className="back" onClick={() => { Sound.play("tap"); setStep(step - 1); }}>Back</button>}
-          {step < steps.length - 1 && <button className="back" onClick={onDone}>Skip</button>}
+        <div className="tourFoot">
+          {step.center ? (
+            <>
+              {i === 0 ? <button className="tourLink" onClick={onDone}>Skip tour</button> : <button className="tourLink" onClick={() => { Sound.play("tap"); toStep(i - 1); }}>Back</button>}
+              <button className="btn accent" autoFocus onClick={() => { Sound.play("tap"); i === last ? onDone() : toStep(i + 1); }}>{i === last ? "Open my list" : "Show me around"}</button>
+            </>
+          ) : (
+            <>
+              <button className="tourLink" onClick={() => { Sound.play("tap"); toStep(i - 1); }}>Back</button>
+              <div className="tourDots" aria-label={`Step ${i} of ${last - 1}`}>
+                {steps.slice(1, last).map((_, k) => <i key={k} className={k + 1 === i ? "on" : k + 1 < i ? "past" : ""} />)}
+              </div>
+              {interactive
+                ? <button className="tourLink" onClick={() => { Sound.play("tap"); toStep(i + 1); }}>Skip step</button>
+                : <button className="btn accent small" onClick={() => { Sound.play("tap"); toStep(i + 1); }}>Next</button>}
+            </>
+          )}
         </div>
+        {!step.center && <button className="tourX" onClick={onDone} aria-label="End the tour"><X size={16} /></button>}
       </div>
-      <p className="introPow"><Starburst size={11} /> Study assistant powered by AI</p>
     </div>
   );
 }
@@ -1606,7 +1885,7 @@ function QuickAdd({ subjects, onFill }) {
     }
   };
   return (
-    <div className="field" style={{ paddingBottom: 18, borderBottom: `1px solid ${C.line}` }}>
+    <div className="field" data-tour="quick-add" style={{ paddingBottom: 18, borderBottom: `1px solid ${C.line}` }}>
       <label htmlFor="qa">Quick add</label>
       <div style={{ display: "flex", gap: 8 }}>
         <input id="qa" className="input" value={q} onChange={(e) => setQ(e.target.value)} placeholder="math quiz friday, chapter 2"
@@ -1761,11 +2040,11 @@ function TaskRow({ t, status, finished, groupName, proofState, i, selected, leav
         <span style={{ opacity: dx > 24 ? 1 : 0 }}><Check size={16} />{done ? "Undo" : "Done"}</span>
         <span style={{ opacity: dx < -24 ? 1 : 0 }}>Edit <Pencil size={16} /></span>
       </div>
-      <div className="row" role="button" tabIndex={0} data-sel={selected ? 1 : 0}
+      <div className="row" role="button" tabIndex={0} data-sel={selected ? 1 : 0} data-tour={t.id === DEMO_ID ? "practice-row" : undefined}
         style={{ transform: `translateX(${dx}px)`, transition: drag ? "none" : "transform .4s var(--ease), border-color .25s, background .25s" }}
         onClick={() => { if (g.current.moved) return; onOpen(); }}
         onKeyDown={(e) => e.key === "Enter" && onOpen()}>
-        <button className="check" data-s={status} aria-label={done ? "Mark as not done" : "Mark as done"} onClick={(e) => { e.stopPropagation(); onToggle(); }}>
+        <button className="check" data-s={status} data-tour={t.id === DEMO_ID ? "practice-check" : undefined} aria-label={done ? "Mark as not done" : "Mark as done"} onClick={(e) => { e.stopPropagation(); onToggle(); }}>
           {done && <Check size={14} strokeWidth={3} />}
           {pop && (
             <span className="burstDots" aria-hidden="true">
@@ -1781,6 +2060,7 @@ function TaskRow({ t, status, finished, groupName, proofState, i, selected, leav
           <div className="rowMeta">
             <span><span className="dot" style={{ background: subjColor(t.subject) }} />{t.subject}</span>
             <span>{t.type}</span>
+            {t.id === DEMO_ID && <span className="practice">Practice</span>}
             {t.quarter && <span>Q{t.quarter}</span>}
             {groupName && <span>{groupName}</span>}
             {proofState && (
@@ -1793,7 +2073,7 @@ function TaskRow({ t, status, finished, groupName, proofState, i, selected, leav
           </div>
         </div>
         <div className="rowRight">
-          <div className={n < 0 && !done ? "late" : ""}>{relLabel(t.deadline)}</div>
+          <div className="due" data-tone={done ? "done" : n < 0 ? "late" : n === 0 ? "today" : ""}>{relLabel(t.deadline)}</div>
           <div className="pri" data-p={t.priority}>{t.priority}</div>
         </div>
       </div>
@@ -1866,7 +2146,7 @@ function TasksTab({ user, tasks, progress, completions, announcements, weeklies,
   const [fOpen, setFOpen] = useState(false);
   const [leaving, setLeaving] = useState({});
   const change = (id, to) => {
-    if (to === "done" && ui.view === "upcoming") {
+    if (to === "done" && ui.view === "upcoming" && id !== DEMO_ID) {
       setLeaving((l) => ({ ...l, [id]: true }));
       setTimeout(() => setLeaving((l) => { const n = { ...l }; delete n[id]; return n; }), 1150);
     }
@@ -1893,7 +2173,7 @@ function TasksTab({ user, tasks, progress, completions, announcements, weeklies,
     .filter((t) => subj === "All" || t.subject === subj)
     .filter((t) => ui.kind === "All" || t.type === ui.kind)
     .filter((t) => qv === null || t.quarter === qv)
-    .filter((t) => (view === "done" ? st(t) === "done" : view === "upcoming" ? st(t) !== "done" || leaving[t.id] : true))
+    .filter((t) => (view === "done" ? st(t) === "done" : view === "upcoming" ? st(t) !== "done" || leaving[t.id] || t.id === DEMO_ID : true))
     .sort((a, b) => a.deadline.localeCompare(b.deadline) || prio[a.priority] - prio[b.priority] || a.title.localeCompare(b.title));
   const boardItems = tasks
     .filter((t) => subj === "All" || t.subject === subj)
@@ -1966,7 +2246,7 @@ function TasksTab({ user, tasks, progress, completions, announcements, weeklies,
             <span className={streak ? "streak" : "streak quiet"}><Flame size={14} />{streak ? `${streak}-day streak` : "Start a streak today"}</span>
           </div>
         </div>
-        <Ring pct={wkPct} size={bp === "phone" ? 92 : 124} stroke={9}><b>{Math.round(wkPct * 100)}%</b><span>this week</span></Ring>
+        <Ring pct={wkPct} size={bp === "phone" ? 80 : 124} stroke={9}><b>{Math.round(wkPct * 100)}%</b><span>this week</span></Ring>
       </div>
       {anns.map((a) => (
         <div className="ann" key={a.id}>
@@ -2024,7 +2304,7 @@ function TasksTab({ user, tasks, progress, completions, announcements, weeklies,
         <button className="chip filterBtn" aria-pressed={fOpen} onClick={() => { Sound.play("tap"); setFOpen((v) => !v); }} aria-label="Filters">
           <SlidersHorizontal size={15} /><span>Filters</span>{activeFilters > 0 && <b className="fcount">{activeFilters}</b>}
         </button>
-        <div className="ico" role="group" aria-label="View">
+        <div className="ico" role="group" aria-label="View" data-tour="view-toggle">
           <button aria-pressed={mode === "list"} onClick={() => setMode("list")} aria-label="List view"><ListIcon size={17} /></button>
           <button aria-pressed={mode === "calendar"} onClick={() => setMode("calendar")} aria-label="Calendar view"><CalendarDays size={17} /></button>
           <button className="boardBtn" aria-pressed={mode === "board"} onClick={() => setMode("board")} aria-label="Board view"><Columns3 size={17} /></button>
@@ -3365,7 +3645,9 @@ export default function App() {
   const [planOpen, setPlanOpen] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
   const [toast, setToast] = useState(null);
-  const [intro, setIntro] = useState(false); // NEW — first-run welcome tour
+  const [tour, setTour] = useState(false); // the hands-on welcome tour
+  const [demo, setDemo] = useState("todo"); // status of the practice task (lives only in the tour)
+  const tourUi = useRef(null); // the person's own list settings, put back when the tour ends
   const [theme, setTheme] = useState("auto");
   const [audio, setAudio] = useState({ sfx: true, music: false, vol: 0.5 });
   const [sysDark, setSysDark] = useState(() => (window.matchMedia ? window.matchMedia("(prefers-color-scheme: dark)").matches : false));
@@ -3398,7 +3680,7 @@ export default function App() {
     try { setActivity(JSON.parse(localStorage.getItem("hr:act:" + user) || "[]")); } catch { setActivity([]); }
   }, [user]);
   useEffect(() => {
-    if (!user || !classId) return;
+    if (!user || !classId || tour) return;
     const h = (e) => {
       const tag = (e.target.tagName || "").toLowerCase();
       const typing = tag === "input" || tag === "textarea" || tag === "select" || e.target.isContentEditable;
@@ -3409,7 +3691,7 @@ export default function App() {
     };
     window.addEventListener("keydown", h);
     return () => window.removeEventListener("keydown", h);
-  }, [user, classId]);
+  }, [user, classId, tour]);
 
   /* ----- loading ----- */
 
@@ -3553,23 +3835,35 @@ export default function App() {
     setProgress((await store.get(`u:${u}:progress`, true)) || {});
     await Promise.all([loadShared(u), new Promise((r) => setTimeout(r, 900))]);
     lastSync.current = Date.now();
-    // NEW — show the welcome tour once, only for brand-new accounts
+    // show the welcome tour once, only for brand-new accounts
     const seenIntro = await store.get(`intro:${u}`);
-    if (!seenIntro && !admin) setIntro(true);
+    if (!seenIntro && !admin) { setTab("tasks"); setTour(true); }
     setReady(true);
   };
 
-  // NEW — marks the tour as seen so it never shows again for this account
-  const finishIntro = async () => {
+  // the tour is marked as seen so it only starts by itself once per account; it can be replayed from the account menu
+  const finishTour = async () => {
+    setTour(false); setDemo("todo");
+    setDetailId(null); setForm(null); setSearchOpen(false);
+    if (tourUi.current) { setUi(tourUi.current); tourUi.current = null; }
     if (user) await store.set(`intro:${user}`, true);
-    setIntro(false);
     Sound.play("add");
+  };
+  useEffect(() => { if (tour && !tourUi.current) tourUi.current = ui; }, [tour]);
+  const tourGo = (s = {}) => {
+    setTab(s.tab || "tasks");
+    setDetailId(s.detail ? DEMO_ID : null);
+    setForm(s.form ? { mode: "add" } : null);
+    setSearchOpen(!!s.search);
+    setMenu(false); setFocusOpen(false); setPlanOpen(false); setGroupsOpen(false);
+    setUi((u) => ({ ...u, view: "upcoming", subj: "All", kind: "All", group: "date", q: "All", mode: s.mode || "list" }));
+    if (s.demo) setDemo(s.demo);
   };
 
   const signOut = async () => {
     await supabase.auth.signOut(); setIsAdmin(false);
     Sound.stopMusic();
-    setUser(null); setMenu(false); setTab("tasks");
+    setUser(null); setMenu(false); setTab("tasks"); setTour(false);
     setTasks([]); setMaterials([]); setComments([]); setCompletions({}); setAnnouncements([]); setWeeklies([]); setProofs({}); setGroups([]);
     backfilled.current = false;
   };
@@ -3675,6 +3969,10 @@ export default function App() {
   /* ----- progress ----- */
 
   const setStatus = (id, s) => {
+    if (id === DEMO_ID) { // the tour's practice task is never saved
+      if (s !== demo) { setDemo(s); Sound.play(s === "done" ? "done" : s === "progress" ? "pop" : "undo"); }
+      return;
+    }
     const cur = progressRef.current;
     const prev = cur[id] || "todo";
     if (prev === s) return;
@@ -3704,7 +4002,11 @@ export default function App() {
   const groupById = useMemo(() => Object.fromEntries(groups.map((g) => [g.id, g])), [groups]);
   const defQuarter = ui.q && ui.q !== "All" ? Number(ui.q) : (tasks.length ? tasks[tasks.length - 1].quarter || 1 : 1);
   const proofTask = tasks.find((t) => t.id === proofFor);
-  const detail = tasks.find((t) => t.id === detailId);
+  const demoTask = useMemo(makeDemoTask, []);
+  const viewTasks = useMemo(() => (tour ? [demoTask, ...tasks] : tasks), [tour, tasks, demoTask]);
+  const viewProgress = tour ? { ...progress, [DEMO_ID]: demo } : progress;
+  const tourCtx = { tab, detail: detailId === DEMO_ID, form: !!form, mode: ui.mode, search: searchOpen, demo };
+  const detail = viewTasks.find((t) => t.id === detailId);
   const doneCount = tasks.filter((t) => progress[t.id] === "done").length;
   const themeAttr = dark ? "dark" : "light";
   const accentStyle = { "--accent": (ACCENTS[accent] || ACCENTS.clay)[dark ? 1 : 0] };
@@ -3726,23 +4028,13 @@ export default function App() {
   if (!classId) {
     return <div className="hr solo" data-theme={themeAttr} style={accentStyle}><style>{CSS}</style><AuthShell><ClassGate classes={classes} setClasses={setClasses} onChoose={chooseClass} /></AuthShell></div>;
   }
-  // NEW — the welcome tour, shown once after a brand-new account is created
-  if (intro) {
-    const label = classes.find((c) => c.id === classId)?.label;
-    return (
-      <div className="hr solo" data-theme={themeAttr} style={accentStyle}>
-        <style>{CSS}</style>
-        <AuthShell><Intro user={user} classLabel={label} onDone={finishIntro} /></AuthShell>
-      </div>
-    );
-  }
-
   const classLabel = classes.find((c) => c.id === classId)?.label;
   const tabs = [
     ["tasks", "Tasks", ListChecks],
     ["review", "Review", BookOpen],
     ["ask", "Ask", MessageCircle],
   ];
+  const isDemo = detail?.id === DEMO_ID;
   const finishedOthers = detail ? (completions[detail.id] || []).filter((u) => u !== user).length : 0;
 
   const detailBody = detail && (
@@ -3788,7 +4080,9 @@ export default function App() {
               );
             })()}
             <div style={{ margin: "22px 0 10px", fontSize: 13, color: C.muted }}>Your progress</div>
-            <Segmented value={progress[detail.id] || "todo"} options={STATUSES} onChange={(s) => requestStatus(detail.id, s)} />
+            <Segmented tour="detail-status" value={viewProgress[detail.id] || "todo"} options={STATUSES} onChange={(s) => requestStatus(detail.id, s)} />
+            {isDemo && <p className="meta" style={{ margin: "22px 0 0" }}>This is a practice task. It isn't saved, and only you can see it.</p>}
+            {!isDemo && <>
             <div style={{ display: "flex", gap: 10, marginTop: 26, flexWrap: "wrap" }}>
               <button className="btn accent" onClick={() => { setReviewFocus(detail.id); setTab("review"); setDetailId(null); }}>Review this</button>
               <button className="btn ghost" onClick={() => { setForm({ mode: "edit", task: detail }); setDetailId(null); }}><Pencil size={14} style={{ verticalAlign: -2, marginRight: 6 }} />Edit</button>
@@ -3798,6 +4092,7 @@ export default function App() {
             </div>
             {confirmDel && <p style={{ fontSize: 13, color: C.muted, marginTop: 12 }}>This removes it for the whole class. Its notes stay in the Library, and you can undo right after.</p>}
             <Comments taskId={detail.id} comments={comments} user={user} isAdmin={isAdmin} onAdd={addComment} onRemove={removeComment} />
+            </>}
           </div>
   );
 
@@ -3810,7 +4105,7 @@ export default function App() {
         {navSlider}
         <div className="railLogo"><span className="mark logoFull">Homeroom</span><span className="mark logoMini">H</span></div>
         {tabs.map(([k, l, Icon]) => (
-          <button key={k} className="nav" aria-current={tab === k ? "page" : undefined} onClick={() => { if (tab !== k) Sound.play("tap"); setTab(k); }}>
+          <button key={k} className="nav" data-tour={`tab-${k}`} aria-current={tab === k ? "page" : undefined} onClick={() => { if (tab !== k) Sound.play("tap"); setTab(k); }}>
             <Icon size={21} /><span>{l}</span>
           </button>
         ))}
@@ -3826,20 +4121,20 @@ export default function App() {
             {classLabel && <span className="classChip">{classLabel}</span>}
           </span>
           <div className="hdrRight">
-            <button className="searchPill" onClick={() => { Sound.play("tap"); setSearchOpen(true); }}>
+            <button className="searchPill" data-tour="search" onClick={() => { Sound.play("tap"); setSearchOpen(true); }}>
               <Search size={16} /><span>Search tasks and notes</span><kbd className="kbd">Ctrl K</kbd>
             </button>
-            <button className="hdrBtn searchBtn" aria-label="Search" onClick={() => { Sound.play("tap"); setSearchOpen(true); }}><Search size={17} /></button>
+            <button className="hdrBtn searchBtn" data-tour="search" aria-label="Search" onClick={() => { Sound.play("tap"); setSearchOpen(true); }}><Search size={17} /></button>
             <button className="hdrBtn" aria-label={audio.music ? "Turn music off" : "Turn music on"} aria-pressed={audio.music}
               style={audio.music ? { color: "var(--accent)", borderColor: "var(--accent)" } : undefined} onClick={toggleMusic}><Music size={17} /></button>
-            <button className="btn accent small newBtn" onClick={() => { Sound.play("tap"); setForm({ mode: "add" }); }}><Plus size={16} />New task</button>
+            <button className="btn accent small newBtn" data-tour="new-task" onClick={() => { Sound.play("tap"); setForm({ mode: "add" }); }}><Plus size={16} />New task</button>
             <button className="avatar phoneOnly" onClick={() => { Sound.play("tap"); setMenu(true); }} aria-label="Account">{user[0].toUpperCase()}</button>
           </div>
         </header>
         {syncErr && <div style={{ background: "var(--errbg)", color: C.danger, fontSize: 13, padding: "8px 20px" }}>Your last change may not have saved. Check your connection.</div>}
         <div className="page" key={tab}>
           {tab === "tasks" && (
-            <TasksTab user={user} tasks={tasks} progress={progress} completions={completions}
+            <TasksTab user={user} tasks={viewTasks} progress={viewProgress} completions={completions}
               announcements={announcements.filter((a) => !dismissedAnn.includes(a.id))} dismissAnn={dismissAnn}
               weeklies={weeklies} onOpenWeekly={(ws) => { setReviewStart({ section: "weekly", ws }); setTab("review"); }}
               setStatus={requestStatus} classGroups={groups} proofs={proofs} openGroups={() => setGroupsOpen(true)}
@@ -3855,7 +4150,7 @@ export default function App() {
           {tab === "ask" && <AskTab user={user} tasks={tasks} materials={materials} progress={progress} addTask={(t) => { Sound.play("add"); addTask({ quarter: defQuarter, ...t }); }} />}
         </div>
         {tab === "tasks" && (
-          <button className="fab" aria-label="Add a task" onClick={() => { Sound.play("tap"); setForm({ mode: "add" }); }}><Plus size={26} /></button>
+          <button className="fab" data-tour="new-task" aria-label="Add a task" onClick={() => { Sound.play("tap"); setForm({ mode: "add" }); }}><Plus size={26} /></button>
         )}
         {toast && (
           <div className="toast" role="status" key={toast.id}>
@@ -3866,7 +4161,7 @@ export default function App() {
         <nav className="tabs" aria-label="Main" ref={tabsRef}>
           {tabsSlider}
           {tabs.map(([k, l, Icon]) => (
-            <button key={k} className="tab" aria-current={tab === k ? "page" : undefined} onClick={() => { if (tab !== k) Sound.play("tap"); setTab(k); }}>
+            <button key={k} className="tab" data-tour={`tab-${k}`} aria-current={tab === k ? "page" : undefined} onClick={() => { if (tab !== k) Sound.play("tap"); setTab(k); }}>
               <Icon size={21} />{l}
             </button>
           ))}
@@ -3882,7 +4177,7 @@ export default function App() {
             {detailBody}
           </div>
         ) : (
-          <SideToday tasks={tasks} progress={progress} openTask={(id) => { setDetailId(id); setConfirmDel(false); }} timer={timer} />
+          <SideToday tasks={viewTasks} progress={viewProgress} openTask={(id) => { setDetailId(id); setConfirmDel(false); }} timer={timer} />
         )}
       </aside>
       <Sheet open={!!detail && bp !== "desktop"} onClose={() => setDetailId(null)} title="Task">
@@ -3961,6 +4256,9 @@ export default function App() {
             onChange={(e) => { const v = Number(e.target.value); setAudio((a) => ({ ...a, vol: v })); Sound.setVolume(v); }}
             style={{ width: "100%", marginTop: 14, accentColor: "var(--accent)" }} />
         </div>
+        <button className="btn ghost full" style={{ marginBottom: 10 }} onClick={() => { setMenu(false); setTour(true); }}>
+          Take the tour again
+        </button>
         <button className="btn ghost full" style={{ marginBottom: 10 }} onClick={() => { setMenu(false); classRef.current = null; setClassId(null); }}>
           Class {classLabel}, change
         </button>
@@ -3972,6 +4270,7 @@ export default function App() {
       <Sheet open={fbOpen} onClose={() => setFbOpen(false)} title="Send a suggestion">
         {fbOpen && <FeedbackForm onSend={sendFeedback} onClose={() => setFbOpen(false)} />}
       </Sheet>
+      {tour && <Tour user={user} bp={bp} ctx={tourCtx} go={tourGo} onDone={finishTour} />}
     </div>
   );
 }
