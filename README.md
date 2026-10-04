@@ -23,19 +23,16 @@ The study assistant needs the server part. To try it locally, make `.dev.vars` (
     npm run build
     npx wrangler pages dev dist
 
-## 3. Put it online (Cloudflare Pages)
+## 3. Put it online (Cloudflare Workers)
 1. Push this folder to a GitHub repository.
-2. Cloudflare dashboard, Workers & Pages, Create, Pages, connect the repository. Build command `npm run build`, output folder `dist`.
-3. Settings, Variables and Secrets:
-   - Secrets: `GEMINI_API_KEY`, `GROQ_API_KEY`
-   - Variables: `SUPABASE_URL`, `SUPABASE_ANON_KEY` (same values as above), and `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY` if you made a new project
-4. Redeploy.
+2. Cloudflare dashboard, Workers & Pages, Create, import the repository. Project name `homeroom` (must match `wrangler.jsonc`). Build command `npm run build`, deploy command `npx wrangler deploy`.
+3. Build variables (needed while building): `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY`.
+4. After the first deploy, open the Worker, Settings, Variables and Secrets, and add Secrets: `GEMINI_API_KEY`, `GROQ_API_KEY`. (`SUPABASE_URL` and `SUPABASE_ANON_KEY` are already set in `wrangler.jsonc`; they are public values.)
+5. In Supabase, Authentication, URL Configuration: set Site URL to your live address.
 
-`.dev.vars` for local testing:
-    GEMINI_API_KEY=...
-    GROQ_API_KEY=...
-    SUPABASE_URL=...
-    SUPABASE_ANON_KEY=...
+To try the study assistant locally, make `.dev.vars` with `GEMINI_API_KEY=...` and `GROQ_API_KEY=...`, then:
+    npm run build
+    npx wrangler dev
 
 Get the AI keys at aistudio.google.com and console.groq.com/keys. Never put them in `src/`.
 

@@ -1,0 +1,16 @@
+{
+  "name": "homeroom",
+  "main": "worker.js",
+  "compatibility_date": "2025-09-01",
+  "assets": {
+    "directory": "./dist",
+    "binding": "ASSETS",
+    "not_found_handling": "single-page-application",
+    "run_worker_first": ["/api/*"]
+  },
+  // These two are public (the publishable key is meant to be public). The AI keys are NOT here; add them as Secrets in Cloudflare.
+  "vars": {
+    "SUPABASE_URL": "https://vvhkjgcnbhzqyxgsdzgq.supabase.co",
+    "SUPABASE_ANON_KEY": "sb_publishable_VzvwYBKX6TTDOqVq5J_RQA_KNd-CR5K"
+  }
+}
