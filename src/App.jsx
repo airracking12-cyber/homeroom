@@ -45,6 +45,12 @@ const LINK_NOTICE = (() => {
   } catch {}
   return {};
 })();
+const CONFIRMED = (() => {
+  try {
+    const q = new URLSearchParams(window.location.hash.replace(/^#/, ""));
+    return !q.get("error") && !q.get("error_code") && ["signup", "email", "invite"].includes(q.get("type"));
+  } catch { return false; }
+})();
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
 
 const TYPES = ["Homework", "Mini Task", "Quiz", "Study", "Project", "Exam"];
@@ -1106,10 +1112,190 @@ textarea.input{resize:vertical;min-height:84px;line-height:1.45}
   .heroDate{font-size:11.5px}
   .stats{gap:8px}
 }
+/* ── v3: one physical language ──
+   Press: whatever you push squeezes in, then springs back.
+   Hover: only things that open something rise, and only a little.
+   Motion you didn't trigger happens once, on the greeting. The big moment is finishing a task. */
+.hr{--shadow-sm:0 1px 2px rgba(60,45,20,.05);--shadow:0 14px 32px -18px rgba(60,45,20,.24),0 1px 3px rgba(60,45,20,.05)}
+.h1{background:none;-webkit-background-clip:border-box;background-clip:border-box;-webkit-text-fill-color:currentColor;color:var(--ink)}
+.heroDate,.card h4,.col h4{text-transform:none;letter-spacing:0;font-size:13.5px;font-weight:550}
+.card h4,.col h4{color:var(--muted)}
+.stat b,.ring .lbl b,.due,.rowRight,.kbd,.group h3 small,.fcount{font-variant-numeric:tabular-nums}
+.heroCard{background:linear-gradient(150deg,color-mix(in srgb,var(--accent) 8%,var(--paper)),var(--paper) 68%)}
+.bgfx i{opacity:.6}
+.bgfx::after{opacity:.35}
+.group{margin-top:30px}
+.page{animation:fade .28s var(--ease) both}
+.swipe{animation-duration:.42s}
+.input:focus{transform:none}
+.row{padding:16px 18px 16px 22px}
+
+/* the three numbers become one calm strip instead of three boxes */
+.stats{gap:0;padding:0;margin:4px 0 16px;background:var(--paper);border:1px solid var(--line);border-radius:22px;box-shadow:var(--shadow-sm);overflow:hidden}
+.stat{background:none;border:0;border-radius:0;box-shadow:none;padding:15px 18px}
+.stat+.stat{border-left:1px solid var(--line)}
+@media (hover:hover){.stat:hover{transform:none;box-shadow:none;border-color:transparent;background:color-mix(in srgb,var(--accent) 5%,transparent)}.stat+.stat:hover{border-left-color:var(--line)}}
+@media (max-width:519px){.stat{padding:13px 14px}}
+
+/* every pressable squeezes the same way */
+.seg button:active,.ico button:active,.day:active,.suggest button:active,.padd:active{transform:scale(.95)}
+
+/* finishing a task: the check draws itself, the circle springs, the ring answers */
+.check[data-pop="1"]{animation:checkPop .55s var(--spring)}
+.check[data-pop="1"] svg{animation:none}
+.check[data-pop="1"] svg :is(path,polyline){stroke-dasharray:24;stroke-dashoffset:24;animation:tickDraw .32s .08s var(--ease) forwards}
+.ring[data-bump="1"]{animation:ringBump .65s var(--spring)}
+.ring[data-bump="1"] .fg{filter:drop-shadow(0 0 7px var(--accent-line))}
+.ring .fg{transition:stroke-dashoffset 1.1s var(--ease),filter .6s var(--ease)}
+@keyframes checkPop{0%{transform:scale(.78)}55%{transform:scale(1.16)}100%{transform:scale(1)}}
+@keyframes tickDraw{to{stroke-dashoffset:0}}
+@keyframes ringBump{0%{transform:scale(1)}40%{transform:scale(1.07)}100%{transform:scale(1)}}
+
+/* a task you just added drops in and glows once, so you can see where it landed */
+.swipe.fresh{animation:dropIn .65s var(--spring) both}
+.swipe.fresh .row{animation:freshGlow 2s var(--ease) both}
+@keyframes dropIn{from{opacity:0;transform:translateY(-12px) scale(.97)}to{opacity:1;transform:none}}
+@keyframes freshGlow{0%,25%{border-color:var(--accent);box-shadow:0 0 0 5px var(--accent-soft)}100%{border-color:var(--line);box-shadow:none}}
+
+/* undo shows how long it has left */
+.toast{overflow:hidden}
+.toastBar{position:absolute;left:0;bottom:0;height:3px;width:100%;background:var(--accent);transform-origin:left;animation:drain 5.2s linear forwards}
+@keyframes drain{to{transform:scaleX(0)}}
+
+/* the header settles onto the page once you scroll */
+.head{transition:box-shadow .3s var(--ease)}
+.main[data-scrolled="1"] .head{box-shadow:0 1px 0 var(--line),0 12px 24px -20px rgba(60,45,20,.35)}
 @media (prefers-reduced-motion:reduce){
   .hr *,.hr *::before,.hr *::after{animation-duration:.01ms!important;animation-delay:0s!important;animation-iteration-count:1!important;transition-duration:.01ms!important;scroll-behavior:auto!important}
   .squig path,.burst path{stroke-dashoffset:0}
 }
+/* ── v4: calm and plain ──
+   One neutral surface, one accent, flat controls, no decoration that doesn't carry information. */
+.hr{--bg:#F7F7F5;--paper:#FFFFFF;--ink:#191A1C;--muted:#62666D;--faint:#92969D;--line:#E6E7EA;--wash:#F0F1F3;--accent:#3A5BC7;--body:#33363B;--shadow-sm:0 1px 2px rgba(20,22,30,.05);--shadow:0 6px 18px -8px rgba(20,22,30,.18);--shadow-lg:0 24px 60px -20px rgba(20,22,30,.35);--glass:var(--paper)}
+.hr[data-theme="dark"]{--bg:#111214;--paper:#18191C;--ink:#F1F2F4;--muted:#A3A7AE;--faint:#70747B;--line:#2A2C30;--wash:#202226;--accent:#8FA6F2;--body:#D6D8DC;--glass:var(--paper)}
+.serif,.mark,.h1,.sectionTitle,.group h3,.ring .lbl b,.avatar,.msg.ai,.stat b{font-family:${SANS}}
+.stat b{font-weight:600;font-size:26px}
+.stat{border-radius:14px;box-shadow:none}
+.h1{font-size:28px;font-weight:650;letter-spacing:-.02em;background:none;-webkit-text-fill-color:currentColor;color:var(--ink)}
+.sectionTitle{font-size:17px;font-weight:600;margin:28px 0 10px}
+.group h3{font-size:15px;font-weight:600}
+.mark{font-size:20px;font-weight:650}
+.msg.ai{font-size:15.5px;line-height:1.6}
+.ring .lbl b{font-weight:600;font-size:24px}
+/* remove decoration */
+.bgfx,.spot::after,.heroCard::before,.btn.accent::after,.authArt::before,.authArt::after{display:none!important}
+.tabs,.rail,.side,.authCard,.artCard{backdrop-filter:none!important;-webkit-backdrop-filter:none!important}
+.rail,.side{background:var(--paper)}
+.tabs{background:var(--paper);border:1px solid var(--line);box-shadow:var(--shadow-sm)}
+.heroCard{background:var(--paper);border-radius:16px;box-shadow:none}
+.fab{background:var(--accent);border-radius:16px;box-shadow:0 6px 16px -6px color-mix(in srgb,var(--accent) 80%,#000)}
+.authArt{background:var(--accent)}
+.artCard{background:rgba(255,255,255,.12);border-radius:14px}
+.authCard{background:var(--paper);border-radius:20px;box-shadow:var(--shadow)}
+/* one radius scale: cards 14, controls 10, pills round */
+.row,.card,.col,.stat,.stats{border-radius:14px}
+.btn,.input,.chip,.filterBtn,.searchPill{border-radius:10px}
+.row,.card,.col{box-shadow:none}
+@media (hover:hover){.row:hover,.chip:hover{box-shadow:none}}
+/* motion that isn't triggered by you: off */
+.heroCard,.h1,.page,.bgfx i{animation:none!important}
+@media (prefers-reduced-motion:reduce){.hr *{animation:none!important;transition:none!important}}
+/* ── intro, registered screen, delete ── */
+.regWrap{text-align:center;padding:8px 4px}
+.regMark{width:56px;height:56px;border-radius:50%;background:var(--okbg);color:var(--ok);display:grid;place-items:center;margin:0 auto 18px}
+.regH{font-size:24px;font-weight:650;letter-spacing:-.02em;margin:0 0 8px}
+.regP{color:var(--muted);margin:0 0 22px;line-height:1.5}
+.btn.danger{background:var(--danger);color:#fff;border:0}
+.btn:disabled{opacity:.45;cursor:default}
+/* ── introduction: a boarding pass ── */
+.wel{--w-bg:#F6F3EC;--w-paper:#FFFFFF;--w-ink:#1C1B19;--w-muted:#6C695F;--w-line:#E5E0D2;--w-acc:#C4694A;--w-ok:#4E8A63;position:fixed;inset:0;z-index:120;display:flex;flex-direction:column;align-items:center;padding:20px 22px calc(22px + env(safe-area-inset-bottom));overflow:auto;color:var(--w-ink);background:radial-gradient(900px 500px at 85% -10%,#F1DDD0,transparent 70%),radial-gradient(700px 500px at 0% 100%,#E9EEF0,transparent 70%),var(--w-bg)}
+.hr[data-theme="dark"] .wel{--w-bg:#161513;--w-paper:#211F1C;--w-ink:#F2EFE7;--w-muted:#A8A498;--w-line:#34312C;--w-acc:#DB8566;--w-ok:#7FB08D;background:var(--w-bg)}
+.welTop{width:100%;max-width:560px;display:flex;justify-content:space-between;align-items:center}
+.welMark{font-family:${SERIF};font-size:20px}
+.welLink{background:none;border:0;font-size:14px;padding:8px 4px;color:var(--w-ink)}
+.welMain{width:100%;max-width:560px;flex:1;display:flex;flex-direction:column;justify-content:center;padding:22px 0;animation:fade .3s ease both}
+.welH{font-family:${SERIF};font-weight:400;font-size:clamp(34px,7vw,44px);letter-spacing:-.025em;line-height:1.08;margin:0 0 14px}
+.welSub{color:var(--w-muted);font-family:${SERIF};font-size:17px;margin:-4px 0 18px}
+.pass{position:relative;background:var(--w-paper);border:1px solid var(--w-line);border-radius:6px 22px 22px 22px;padding:30px 22px 26px;box-shadow:0 18px 40px -22px rgba(60,40,20,.35);transform:rotate(-1deg)}
+.tape{position:absolute;left:50%;top:-12px;width:96px;height:24px;margin-left:-48px;background:#E9D9B2;opacity:.85;transform:rotate(-2deg)}
+.passRow{display:flex;justify-content:space-between;font-size:13px;color:var(--w-muted);margin-bottom:12px}
+.passMade{font-size:14px;color:var(--w-muted)}
+.passName{font-family:${SERIF};font-size:32px;letter-spacing:-.02em;margin:2px 0 12px}
+.passBody{font-family:${SERIF};font-size:18px;line-height:1.6;margin:0 0 18px;max-width:30em}
+.passGrid{display:flex;gap:26px;flex-wrap:wrap;padding-top:14px;border-top:1px dashed var(--w-line)}
+.passGrid small{display:block;font-size:12px;color:var(--w-muted);margin-bottom:2px}
+.passGrid b{font-weight:600;font-size:15px}
+.pass[data-stamped="1"] .passGrid{padding-right:110px}
+.stampGhost,.stampMark{position:absolute;right:14px;bottom:-26px;width:108px;height:108px;border-radius:50%}
+.stampGhost{border:2px dashed var(--w-line)}
+.stampMark{display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;color:var(--w-acc);border:2px solid var(--w-acc);box-shadow:inset 0 0 0 4px var(--w-paper),inset 0 0 0 5px var(--w-acc);background:color-mix(in srgb,var(--w-acc) 6%,transparent);transform:rotate(-12deg);animation:wStamp .5s cubic-bezier(.3,1.5,.5,1) both}
+.stampMark span{font-size:10px}.stampMark b{font-family:${SERIF};font-size:19px;font-weight:500;line-height:1.1}
+@keyframes wStamp{0%{transform:translateY(-30px) scale(1.9) rotate(-22deg);opacity:0}55%{opacity:1}100%{transform:rotate(-12deg)}}
+.bits{position:absolute;right:62px;bottom:20px;pointer-events:none}
+.bits i{position:absolute;width:6px;height:6px;border-radius:2px;background:var(--w-acc);opacity:0;animation:wBit .8s ease-out .15s both}
+.bits i:nth-child(3n){background:#E3AE46}.bits i:nth-child(3n+1){background:#6BA3D1}
+@keyframes wBit{from{transform:rotate(var(--a)) translateX(4px);opacity:1}to{transform:rotate(var(--a)) translateX(var(--d)) scale(.3);opacity:0}}
+.stampBtn{align-self:flex-start;margin-top:54px;display:inline-flex;align-items:center;padding:12px 22px;border-radius:12px;border:1px solid var(--w-line);background:var(--w-paper);font-size:15px;font-weight:600;color:var(--w-ink);transition:transform .15s}
+.stampBtn:not(:disabled){border-color:var(--w-acc);color:var(--w-acc)}
+.stampBtn:active:not(:disabled){transform:scale(.95)}
+.feats{display:flex;flex-direction:column;gap:10px}
+.feat{background:var(--w-paper);border:1px solid var(--w-line);border-radius:14px;overflow:hidden;transition:border-color .2s}
+.feat[data-open="1"]{border-color:color-mix(in srgb,var(--w-acc) 45%,transparent)}
+.featHead{width:100%;display:flex;justify-content:space-between;align-items:center;gap:14px;text-align:left;background:none;border:0;padding:14px 16px;color:var(--w-ink)}
+.featHead b{display:block;font-size:15px}.featHead small{display:block;font-size:14px;color:var(--w-muted);margin-top:2px}
+.featDot{flex:none;width:22px;height:22px;border-radius:50%;border:2px solid var(--w-line);display:grid;place-items:center;color:#fff;transition:background .2s,border-color .2s}
+.feat[data-open="1"] .featDot{background:var(--w-acc);border-color:var(--w-acc)}
+.featBody{padding:0 16px 16px;animation:fade .25s ease both}
+.askChips{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px}
+.askChips button{padding:7px 12px;border-radius:999px;border:1px solid var(--w-line);background:none;font-size:14px;color:var(--w-ink)}
+.askChips button[data-on="1"]{border-color:var(--w-ink)}
+.askMe{margin-left:auto;width:fit-content;max-width:85%;background:var(--w-acc);color:#fff;padding:9px 14px;border-radius:16px 16px 4px 16px;font-size:14px;animation:fade .25s ease both}
+.askAi{font-family:${SERIF};font-size:16px;line-height:1.55;margin-top:12px;animation:fade .4s ease .25s both}
+.ticket{display:flex;background:var(--w-paper);border:1px solid var(--w-line);border-radius:18px;box-shadow:0 18px 40px -22px rgba(60,40,20,.35);position:relative}
+.tkMain{flex:1;padding:20px 20px 18px;min-width:0}
+.tkRoute{display:flex;align-items:center;gap:12px;margin:2px 0 16px}
+.tkRoute b{font-family:${SERIF};font-weight:400;font-size:26px;letter-spacing:-.02em}
+.tkRoute svg{width:54px;height:12px;color:var(--w-muted);flex:none}
+.tkStub{width:92px;flex:none;border-left:2px dashed var(--w-line);padding:18px 12px;display:flex;flex-direction:column;justify-content:space-between;align-items:center;transform-origin:0 100%}
+.tkStub small{font-size:12px;color:var(--w-muted)}
+.bars{display:block;width:100%;height:56px;background:repeating-linear-gradient(90deg,var(--w-ink) 0 2px,transparent 2px 4px,var(--w-ink) 4px 5px,transparent 5px 8px)}
+.ticket[data-fly="1"] .tkStub{animation:wTear .7s ease-in both}
+.ticket[data-fly="1"]{animation:wLift .5s ease .6s both}
+@keyframes wTear{0%{transform:none}30%{transform:rotate(7deg) translateY(4px)}100%{transform:rotate(26deg) translate(60px,260px);opacity:0}}
+@keyframes wLift{to{transform:translateY(-12px);opacity:.0}}
+.plane{position:fixed;left:-80px;top:62%;width:56px;height:56px;color:var(--w-acc);animation:wFly 1.5s cubic-bezier(.5,0,.8,.6) .5s both}
+@keyframes wFly{0%{transform:translate(0,0) rotate(-8deg)}100%{transform:translate(calc(100vw + 160px),-52vh) rotate(-24deg)}}
+.welFoot{width:100%;max-width:560px;display:flex;flex-direction:column;align-items:stretch;gap:12px;padding-top:6px}
+.welStatus{min-height:20px;text-align:center;font-size:14px;font-weight:600;color:var(--w-ok)}
+.welDots{display:flex;justify-content:center;gap:6px}
+.welDots i{width:7px;height:7px;border-radius:4px;background:var(--w-line);transition:width .3s,background .3s}
+.welDots i[data-past="1"]{background:color-mix(in srgb,var(--w-acc) 45%,transparent)}
+.welDots i[data-on="1"]{width:24px;background:var(--w-acc)}
+.welGo{padding:15px;border-radius:14px;border:0;background:var(--w-acc);color:#fff;font-size:16px;font-weight:600;transition:transform .15s,opacity .2s}
+.welGo:active:not(:disabled){transform:scale(.97)}
+.welGo:disabled{opacity:.4;cursor:default}
+.welFoot .welLink{align-self:center}
+/* ── v6: less on screen, tasks first ── */
+.stats{display:none}
+.heroCard{padding:16px 20px;margin:6px 0 12px;gap:14px}
+.heroCard .h1{font-size:24px;margin:0 0 2px}
+.heroCard .sub{margin:0}
+.heroDate{font-size:13px;font-weight:500;color:var(--muted)}
+.heroChips{margin-top:8px}
+.note,.ann{padding:9px 6px 9px 14px;margin:0 0 8px;border-radius:12px;box-shadow:none;align-items:center;animation:none}
+.note>div{display:flex;flex-wrap:wrap;gap:2px 16px;align-items:center}
+.note p{margin:0;font-size:14px;line-height:1.5}
+.note .btn.small{padding:4px 10px}
+.row{animation:rowIn .42s var(--ease) both}
+.row:nth-child(2){animation-delay:40ms}.row:nth-child(3){animation-delay:80ms}.row:nth-child(4){animation-delay:120ms}.row:nth-child(5){animation-delay:160ms}.row:nth-child(n+6){animation-delay:200ms}
+@keyframes rowIn{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
+.nav,.tab,.chip,.btn,.iconBtn,.avatar{transition:background-color .2s var(--ease),color .2s var(--ease),border-color .2s var(--ease),transform .25s var(--spring)}
+/* introduction follows the app's own palette */
+.wel{--w-bg:var(--bg);--w-paper:var(--paper);--w-ink:var(--ink);--w-muted:var(--muted);--w-line:var(--line);--w-acc:var(--accent);--w-ok:var(--ok);background:radial-gradient(900px 480px at 85% -10%,color-mix(in srgb,var(--accent) 14%,transparent),transparent 70%),var(--bg)}
+.hr[data-theme="dark"] .wel{--w-bg:var(--bg);--w-paper:var(--paper);--w-ink:var(--ink);--w-muted:var(--muted);--w-line:var(--line);--w-acc:var(--accent);--w-ok:var(--ok)}
+.tape{background:color-mix(in srgb,var(--accent) 22%,var(--paper))}
+.tkRoute{gap:8px}.tkRoute b{font-size:22px}.tkRoute svg{width:34px}.tkStub{width:78px;padding:16px 8px}
+@media (min-width:480px){.tkRoute{gap:12px}.tkRoute b{font-size:26px}.tkRoute svg{width:54px}.tkStub{width:92px;padding:18px 12px}}
 `;
 
 /* ───────────────────────── small pieces ───────────────────────── */
@@ -1581,6 +1767,8 @@ function Scroll({ onRefresh, children, style, wide }) {
   const y0 = useRef(null);
   const [pull, setPull] = useState(0);
   const [busy, setBusy] = useState(false);
+  const edge = (el) => { const m = el && el.closest(".main"); if (m) m.dataset.scrolled = el.scrollTop > 6 ? "1" : "0"; };
+  useEffect(() => { edge(ref.current); }, []);
   const start = (e) => { y0.current = ref.current && ref.current.scrollTop <= 0 ? e.touches[0].clientY : null; };
   const move = (e) => {
     if (y0.current == null || busy || !onRefresh) return;
@@ -1596,7 +1784,7 @@ function Scroll({ onRefresh, children, style, wide }) {
   };
   const h = busy ? 44 : pull;
   return (
-    <div className={wide ? "scroll wide" : "scroll"} ref={ref} onTouchStart={start} onTouchMove={move} onTouchEnd={end} style={style}>
+    <div className={wide ? "scroll wide" : "scroll"} ref={ref} onScroll={(e) => edge(e.currentTarget)} onTouchStart={start} onTouchMove={move} onTouchEnd={end} style={style}>
       <div className="ptr" style={{ height: h, transition: pull && !busy ? "none" : "height .2s" }}>
         {h > 14 && <span className={busy ? "spin" : "spin idle"} style={{ opacity: Math.min(1, h / 44), transform: busy ? undefined : `rotate(${h * 5}deg)` }} />}
       </div>
@@ -1744,7 +1932,7 @@ function Auth({ onAuthed }) {
   const [mail, setMail] = useState("");
   const [pw, setPw] = useState("");
   const [err, setErr] = useState(LINK_NOTICE.err || "");
-  const [info, setInfo] = useState(LINK_NOTICE.info || "");
+  const [info, setInfo] = useState(() => { try { const m = sessionStorage.getItem("hr:notice"); sessionStorage.removeItem("hr:notice"); return m || LINK_NOTICE.info || ""; } catch { return LINK_NOTICE.info || ""; } });
   const [busy, setBusy] = useState(false);
   const switchMode = (m) => { setMode(m); setErr(""); setInfo(""); };
   const submit = async () => {
@@ -2035,7 +2223,7 @@ function TaskRow({ t, status, finished, groupName, proofState, i, selected, leav
     dxRef.current = 0; setDrag(false); setDx(0);
   };
   return (
-    <div className={leaving ? "swipe leaving" : "swipe"} style={{ "--i": Math.min(i || 0, 12), "--sc": subjColor(t.subject) }} onTouchStart={start} onTouchMove={move} onTouchEnd={end} onTouchCancel={end}>
+    <div className={`swipe${leaving ? " leaving" : ""}${t.createdAt && Date.now() - t.createdAt < 4000 ? " fresh" : ""}`} style={{ "--i": Math.min(i || 0, 12), "--sc": subjColor(t.subject) }} onTouchStart={start} onTouchMove={move} onTouchEnd={end} onTouchCancel={end}>
       <div className="under" aria-hidden="true">
         <span style={{ opacity: dx > 24 ? 1 : 0 }}><Check size={16} />{done ? "Undo" : "Done"}</span>
         <span style={{ opacity: dx < -24 ? 1 : 0 }}>Edit <Pencil size={16} /></span>
@@ -2044,7 +2232,7 @@ function TaskRow({ t, status, finished, groupName, proofState, i, selected, leav
         style={{ transform: `translateX(${dx}px)`, transition: drag ? "none" : "transform .4s var(--ease), border-color .25s, background .25s" }}
         onClick={() => { if (g.current.moved) return; onOpen(); }}
         onKeyDown={(e) => e.key === "Enter" && onOpen()}>
-        <button className="check" data-s={status} data-tour={t.id === DEMO_ID ? "practice-check" : undefined} aria-label={done ? "Mark as not done" : "Mark as done"} onClick={(e) => { e.stopPropagation(); onToggle(); }}>
+        <button className="check" data-s={status} data-pop={pop ? 1 : 0} data-tour={t.id === DEMO_ID ? "practice-check" : undefined} aria-label={done ? "Mark as not done" : "Mark as done"} onClick={(e) => { e.stopPropagation(); onToggle(); }}>
           {done && <Check size={14} strokeWidth={3} />}
           {pop && (
             <span className="burstDots" aria-hidden="true">
@@ -2241,12 +2429,11 @@ function TasksTab({ user, tasks, progress, completions, announcements, weeklies,
           <p className="sub">
             {today + overdue === 0 ? "Nothing urgent right now." : `${today} due today${overdue ? `, ${overdue} overdue` : ""}.`}
           </p>
-          <p className="quip">{QUIPS[Math.floor(Date.now() / 86400000) % QUIPS.length]}</p>
           <div className="heroChips">
             <span className={streak ? "streak" : "streak quiet"}><Flame size={14} />{streak ? `${streak}-day streak` : "Start a streak today"}</span>
           </div>
         </div>
-        <Ring pct={wkPct} size={bp === "phone" ? 80 : 124} stroke={9}><b>{Math.round(wkPct * 100)}%</b><span>this week</span></Ring>
+        <Ring celebrate pct={wkPct} size={bp === "phone" ? 64 : 88} stroke={7}><Pct v={wkPct} /><span>this week</span></Ring>
       </div>
       {anns.map((a) => (
         <div className="ann" key={a.id}>
@@ -3303,13 +3490,27 @@ function calcStreak(days) {
   return n;
 }
 
-function Ring({ pct, size = 92, stroke = 8, children }) {
+function Pct({ v }) {
+  const n = useCountUp(Math.round(v * 100), 650);
+  return <b>{n}%</b>;
+}
+
+function Ring({ pct, size = 92, stroke = 8, celebrate, children }) {
   const [on, setOn] = useState(false);
+  const [bump, setBump] = useState(false);
+  const prev = useRef(null);
   useEffect(() => { const id = requestAnimationFrame(() => setOn(true)); return () => cancelAnimationFrame(id); }, []);
   const r = (size - stroke) / 2, c = 2 * Math.PI * r;
   const v = Math.max(0, Math.min(1, pct || 0));
+  useEffect(() => {
+    const was = prev.current; prev.current = v;
+    if (!celebrate || was === null || v <= was + 0.004) { setBump(false); return; }
+    setBump(true);
+    const id = setTimeout(() => setBump(false), 750);
+    return () => clearTimeout(id);
+  }, [v]);
   return (
-    <div className="ring" style={{ width: size, height: size }}>
+    <div className="ring" data-bump={bump ? 1 : 0} style={{ width: size, height: size }}>
       <svg width={size} height={size} aria-hidden="true">
         <circle className="bg" cx={size / 2} cy={size / 2} r={r} strokeWidth={stroke} />
         <circle className="fg" cx={size / 2} cy={size / 2} r={r} strokeWidth={stroke} strokeDasharray={c} strokeDashoffset={on ? c * (1 - v) : c} />
@@ -3608,8 +3809,159 @@ function GroupsPanel({ groups, tasks, progress, subjects, defQuarter, onSave, on
   );
 }
 
+/* Shown when someone clicks the link in the confirmation email. They sign in themselves afterwards. */
+function Registered({ onGo }) {
+  useEffect(() => { supabase.auth.signOut().catch(() => {}); }, []);
+  return (
+    <div className="regWrap">
+      <div className="regMark"><Check size={26} strokeWidth={3} /></div>
+      <h1 className="regH">Your account has been registered</h1>
+      <p className="regP">Please log in with the email and password you registered with.</p>
+      <button className="btn accent full" onClick={onGo}>Go to log in</button>
+    </div>
+  );
+}
+
+/* The first-run introduction: who Homeroom is for, what's in it, who made it. Each screen asks you to tap something. */
+const WELCOME_FEATURES = [
+  ["One list for the whole class", "Everyone adds, everyone sees. Nobody has to ask what's due."],
+  ["Calendar and reminders", "Flip to the week view. Overdue and due-today tasks get flagged."],
+  ["Share your notes", "Attach photos and files to a task so the class can study from them."],
+  ["An assistant that knows what's due", "Ask it anything about your tasks. It's powered by AI, so double-check answers."],
+];
+const WELCOME_CHAT = {
+  "What's due tomorrow?": "Tomorrow you have the quiz review and a reading check. The essay isn't due until Friday.",
+  "Plan my evening": "Start with the quiz review, about 20 minutes. Then the reflection, about 15. The essay can wait until Friday.",
+};
+function Welcome({ user, classLabel, onDone }) {
+  const [n, setN] = useState(0);
+  const [stamped, setStamped] = useState(false);
+  const [open, setOpen] = useState({});
+  const [ask, setAsk] = useState(null);
+  const [flying, setFlying] = useState(false);
+  const timer = useRef(null);
+  const where = classLabel || "your class";
+  const allOpen = Object.keys(open).length === WELCOME_FEATURES.length;
+  useEffect(() => {
+    const k = (e) => { if (e.key === "Escape" && !flying) onDone(false); };
+    window.addEventListener("keydown", k);
+    return () => { window.removeEventListener("keydown", k); clearTimeout(timer.current); };
+  }, [onDone, flying]);
+  const stamp = () => {
+    if (stamped) return;
+    setStamped(true); Sound.play("done");
+    try { navigator.vibrate && navigator.vibrate([18, 40, 10]); } catch {}
+  };
+  const board = () => {
+    setFlying(true); Sound.play("add");
+    try { navigator.vibrate && navigator.vibrate(30); } catch {}
+    timer.current = setTimeout(() => onDone(true), 2100);
+  };
+  const status = [stamped ? "Stamped. You're officially in." : "", allOpen ? "That's everything it does." : "", flying ? "" : ""][n];
+  return (
+    <div className="wel" role="dialog" aria-modal="true" aria-label="Introduction">
+      <div className="welTop">
+        <span className="welMark">Homeroom</span>
+        {!flying && <button className="welLink" onClick={() => onDone(false)}>Skip</button>}
+      </div>
+      <div className="welMain" key={n}>
+        {n === 0 && (<>
+          <h1 className="welH">Made for you.</h1>
+          <div className="pass" data-stamped={stamped ? 1 : 0}>
+            <i className="tape" aria-hidden="true" />
+            <div className="passRow"><span>Boarding pass</span><span>Homeroom</span></div>
+            <div className="passMade">Homeroom is made by</div>
+            <div className="passName">Nathaniel Visaya</div>
+            <p className="passBody">Built for {where}, so nobody misses a deadline. Add what's due, share your notes, and look out for each other.</p>
+            <div className="passGrid">
+              <div><small>Passenger</small><b>{user}</b></div>
+              <div><small>Class</small><b>{where}</b></div>
+              <div><small>Status</small><b>{stamped ? "Checked in" : "Not checked in"}</b></div>
+            </div>
+            {stamped
+              ? <div className="stampMark" aria-hidden="true"><span>Homeroom</span><b>{where}</b><span>Welcome in</span></div>
+              : <div className="stampGhost" aria-hidden="true" />}
+            {stamped && <div className="bits" aria-hidden="true">{Array.from({ length: 16 }, (_, i) => <i key={i} style={{ "--a": i * 22.5 + "deg", "--d": 70 + (i * 29) % 50 + "px" }} />)}</div>}
+          </div>
+          <button className="stampBtn" onClick={stamp} disabled={stamped}>{stamped ? "Stamped" : "Stamp my pass"}</button>
+        </>)}
+        {n === 1 && (<>
+          <h1 className="welH">Here's what it does.</h1>
+          <p className="welSub">Open each one and give it a try.</p>
+          <div className="feats">
+            {WELCOME_FEATURES.map(([t, d], i) => (
+              <div key={i} className="feat" data-open={open[i] ? 1 : 0}>
+                <button className="featHead" aria-expanded={!!open[i]} onClick={() => { setOpen((x) => ({ ...x, [i]: 1 })); Sound.play("pop"); }}>
+                  <span><b>{t}</b><small>{d}</small></span>
+                  <span className="featDot">{open[i] && <Check size={12} strokeWidth={3} />}</span>
+                </button>
+                {i === 3 && open[3] && (
+                  <div className="featBody">
+                    <div className="askChips">
+                      {Object.keys(WELCOME_CHAT).map((q) => <button key={q} data-on={ask === q ? 1 : 0} onClick={() => { setAsk(q); Sound.play("pop"); }}>{q}</button>)}
+                    </div>
+                    {ask && <><div className="askMe">{ask}</div><div className="askAi" key={ask}>{WELCOME_CHAT[ask]}</div></>}
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        </>)}
+        {n === 2 && (<>
+          <h1 className="welH">{flying ? `Welcome aboard, ${user}.` : "Ready for takeoff."}</h1>
+          <p className="welSub">{flying ? "Taking you in now." : "Your pass is ready. A quick tour comes next, and you can skip it any time."}</p>
+          <div className="ticket" data-fly={flying ? 1 : 0}>
+            <div className="tkMain">
+              <div className="passRow"><span>Boarding pass</span><span>Gate {where}</span></div>
+              <div className="tkRoute"><b>Home</b><svg viewBox="0 0 60 12" aria-hidden="true"><path d="M0 6h54M48 1l6 5-6 5" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" /></svg><b>Homeroom</b></div>
+              <div className="passGrid"><div><small>Passenger</small><b>{user}</b></div><div><small>Departs</small><b>Now</b></div></div>
+            </div>
+            <div className="tkStub"><i className="bars" aria-hidden="true" /><small>Admit one</small></div>
+          </div>
+          {flying && <svg className="plane" viewBox="0 0 64 64" aria-hidden="true"><path fill="currentColor" d="M62 32 40 24 26 4h-6l7 20-14 2-6-8H2l4 14-4 14h5l6-8 14 2-7 20h6l14-20 22-8z" /></svg>}
+        </>)}
+      </div>
+      <div className="welFoot">
+        <div className="welStatus">{status}</div>
+        <div className="welDots" aria-hidden="true">{[0, 1, 2].map((i) => <i key={i} data-on={i === n ? 1 : 0} data-past={i < n ? 1 : 0} />)}</div>
+        {n === 0 && <button className="welGo" disabled={!stamped} onClick={() => setN(1)}>Show me around</button>}
+        {n === 1 && <button className="welGo" onClick={() => setN(2)}>Continue</button>}
+        {n === 2 && <button className="welGo" disabled={flying} onClick={board}>{flying ? "Boarding" : "Board now"}</button>}
+        {n > 0 && !flying && <button className="welLink" onClick={() => setN(n - 1)}>Back</button>}
+      </div>
+    </div>
+  );
+}
+
+function DeleteAccount({ user, onClose, onDeleted }) {
+  const [typed, setTyped] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState("");
+  const go = async () => {
+    setBusy(true); setErr("");
+    const { error } = await supabase.rpc("delete_my_account");
+    if (error) { setBusy(false); setErr("Couldn't delete the account: " + error.message); return; }
+    onDeleted();
+  };
+  return (
+    <div>
+      <p className="meta" style={{ marginTop: 0 }}>This permanently deletes your account and your saved progress. Tasks you added stay for the class. This can't be undone.</p>
+      <div className="field">
+        <label>Type your username ({user}) to confirm</label>
+        <input className="input" value={typed} onChange={(e) => setTyped(e.target.value)} autoComplete="off" />
+      </div>
+      {err && <p className="meta" style={{ color: "var(--danger)" }}>{err}</p>}
+      <button className="btn danger full" disabled={typed.trim() !== user || busy} onClick={go}>{busy ? "Deleting" : "Delete my account"}</button>
+      <button className="btn ghost full" style={{ marginTop: 10 }} onClick={onClose}>Cancel</button>
+    </div>
+  );
+}
+
 export default function App() {
   const [ready, setReady] = useState(false);
+  const [registered, setRegistered] = useState(CONFIRMED);
+  const [welcome, setWelcome] = useState(false);
+  const [delOpen, setDelOpen] = useState(false);
   const [recovering, setRecovering] = useState(() => /type=recovery/.test(window.location.hash));
   useEffect(() => {
     const { data } = supabase.auth.onAuthStateChange((event) => { if (event === "PASSWORD_RECOVERY") setRecovering(true); });
@@ -3666,7 +4018,7 @@ export default function App() {
   const [swap, setSwap] = useState(false);
   const firstTheme = useRef(true);
   const [focusOpen, setFocusOpen] = useState(false);
-  const [accent, setAccentState] = useState(() => { try { return localStorage.getItem("hr:accent") || "clay"; } catch { return "clay"; } });
+  const [accent, setAccentState] = useState(() => { try { return localStorage.getItem("hr:accent") || "ocean"; } catch { return "ocean"; } });
   const setAccent = (k) => { setAccentState(k); try { localStorage.setItem("hr:accent", k); } catch { /* storage blocked */ } };
   const [activity, setActivity] = useState([]);
   useEffect(() => {
@@ -3723,7 +4075,7 @@ export default function App() {
       if (th) setTheme(th);
       if (au) setAudio((a) => ({ ...a, ...au }));
       const { data: { session } } = await supabase.auth.getSession();
-      const prof = session ? await loadProfile(session.user.id) : null;
+      const prof = session && !CONFIRMED ? await loadProfile(session.user.id) : null;
       if (!prof) { setReady(true); return; }
       const u = prof.username;
       setUser(u); setIsAdmin(!!prof.is_admin);
@@ -3837,11 +4189,21 @@ export default function App() {
     lastSync.current = Date.now();
     // show the welcome tour once, only for brand-new accounts
     const seenIntro = await store.get(`intro:${u}`);
-    if (!seenIntro && !admin) { setTab("tasks"); setTour(true); }
+    if (!seenIntro && !admin) { setTab("tasks"); setWelcome(true); }
     setReady(true);
   };
 
   // the tour is marked as seen so it only starts by itself once per account; it can be replayed from the account menu
+  const finishWelcome = async (startTour) => {
+    setWelcome(false);
+    if (user) await store.set(`intro:${user}`, true);
+    if (startTour) setTour(true);
+  };
+  const afterDelete = () => {
+    try { Object.keys(localStorage).filter((k) => k.startsWith(LS) && k.includes(`:${user}`)).forEach((k) => localStorage.removeItem(k)); sessionStorage.setItem("hr:notice", "Your account has been deleted."); } catch {}
+    supabase.auth.signOut().catch(() => {});
+    setDelOpen(false); signOut();
+  };
   const finishTour = async () => {
     setTour(false); setDemo("todo");
     setDetailId(null); setForm(null); setSearchOpen(false);
@@ -3980,6 +4342,7 @@ export default function App() {
     progressRef.current = next;
     setProgress(next);
     Sound.play(s === "done" ? "done" : s === "progress" ? "pop" : "undo");
+    if (s === "done" && navigator.vibrate) navigator.vibrate([8, 50, 16]);
     store.set(`u:${user}:progress`, next, true);
     if (s === "done" || prev === "done") markCompletion(id, s === "done");
     if (s === "done") logActivity();
@@ -4009,9 +4372,13 @@ export default function App() {
   const detail = viewTasks.find((t) => t.id === detailId);
   const doneCount = tasks.filter((t) => progress[t.id] === "done").length;
   const themeAttr = dark ? "dark" : "light";
-  const accentStyle = { "--accent": (ACCENTS[accent] || ACCENTS.clay)[dark ? 1 : 0] };
+  const accentStyle = { "--accent": (ACCENTS[accent] || ACCENTS.ocean)[dark ? 1 : 0] };
   const streak = calcStreak(activity);
 
+  if (registered) {
+    const go = () => { window.history.replaceState(null, "", window.location.pathname); setRegistered(false); };
+    return <div className="hr solo" data-theme={themeAttr} style={accentStyle}><style>{CSS}</style><AuthShell><Registered onGo={go} /></AuthShell></div>;
+  }
   if (!ready) {
     return <div className="hr solo" data-theme={themeAttr} style={accentStyle}><style>{CSS}</style><Backdrop /><Splash /></div>;
   }
@@ -4156,6 +4523,7 @@ export default function App() {
           <div className="toast" role="status" key={toast.id}>
             <span>{toast.msg}</span>
             {toast.undo && <button onClick={() => { const u = toast.undo; setToast(null); u(); }}>Undo</button>}
+            {toast.undo && <i className="toastBar" aria-hidden="true" />}
           </div>
         )}
         <nav className="tabs" aria-label="Main" ref={tabsRef}>
@@ -4256,8 +4624,8 @@ export default function App() {
             onChange={(e) => { const v = Number(e.target.value); setAudio((a) => ({ ...a, vol: v })); Sound.setVolume(v); }}
             style={{ width: "100%", marginTop: 14, accentColor: "var(--accent)" }} />
         </div>
-        <button className="btn ghost full" style={{ marginBottom: 10 }} onClick={() => { setMenu(false); setTour(true); }}>
-          Take the tour again
+        <button className="btn ghost full" style={{ marginBottom: 10 }} onClick={() => { setMenu(false); setWelcome(true); }}>
+          Play introduction
         </button>
         <button className="btn ghost full" style={{ marginBottom: 10 }} onClick={() => { setMenu(false); classRef.current = null; setClassId(null); }}>
           Class {classLabel}, change
@@ -4266,10 +4634,15 @@ export default function App() {
           Send a suggestion or report a problem
         </button>
         <button className="btn ghost full" onClick={signOut}>Sign out</button>
+        <button className="btn ghost full" style={{ marginTop: 10, color: "var(--danger)" }} onClick={() => { setMenu(false); setDelOpen(true); }}>Delete account</button>
+      </Sheet>
+      <Sheet open={delOpen} onClose={() => setDelOpen(false)} title="Delete account">
+        {delOpen && <DeleteAccount user={user} onClose={() => setDelOpen(false)} onDeleted={afterDelete} />}
       </Sheet>
       <Sheet open={fbOpen} onClose={() => setFbOpen(false)} title="Send a suggestion">
         {fbOpen && <FeedbackForm onSend={sendFeedback} onClose={() => setFbOpen(false)} />}
       </Sheet>
+      {welcome && <Welcome user={user} classLabel={classLabel} onDone={finishWelcome} />}
       {tour && <Tour user={user} bp={bp} ctx={tourCtx} go={tourGo} onDone={finishTour} />}
     </div>
   );

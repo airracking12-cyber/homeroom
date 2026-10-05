@@ -41,6 +41,16 @@ New accounts get a hands-on tour the first time they sign in. It lights up the r
 
 The tour lives in the `Tour` component in `src/App.jsx`. To change a step, edit the `tourSteps` list just above it. To point a step at another control, add `data-tour="some-name"` to that control and use the same name as the step's `target`.
 
+## How the interface moves
+One set of rules, so nothing feels random:
+- **Press:** anything you push squeezes in slightly, then springs back.
+- **Hover:** only things that open something rise, and only a little.
+- **Finishing a task is the big moment:** the check draws itself, the circle springs, the title strikes through, the card slides away, the weekly ring counts up and glows, and the undo toast shows a bar running down. On phones there is a short buzz.
+- **A task you just added** drops into the list and glows once, so you can see where it landed.
+- **Everything else stays quiet.** The greeting animates in once on load, tab changes are a plain fade, and the header gets a soft edge once you scroll.
+
+The styles are in the `v3` block near the end of the `CSS` string in `src/App.jsx`.
+
 ## Keyboard
 N = new task, / or Ctrl+K = search, Esc = close.
 
