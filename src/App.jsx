@@ -1349,7 +1349,7 @@ textarea.input{resize:vertical;min-height:84px;line-height:1.45}
 .seatDot{position:absolute;top:-3px;right:-3px;width:10px;height:10px;border-radius:50%;background:var(--ok);border:2px solid var(--paper);text-decoration:none}
 .seatSubj{position:absolute;left:2px;top:-4px;display:flex;gap:2px}
 .seatSubj i{width:8px;height:8px;border-radius:50%;border:1.5px solid var(--paper)}
-.seat.empty{display:block;height:34px;border-radius:11px 11px 6px 6px;border:1.5px dashed var(--line);opacity:.55}
+.seat.vacant{display:block;height:34px;border-radius:11px 11px 6px 6px;border:1.5px dashed var(--line);opacity:.55}
 .tail{height:20px;margin:8px auto 0;width:58%;border-radius:0 0 18px 18px;background:color-mix(in srgb,var(--ink) 8%,transparent)}
 .cabinCard{padding:12px 14px;border-radius:16px;border:1px solid var(--line);background:var(--paper);box-shadow:var(--shadow-sm)}
 .cabinWho{display:flex;align-items:baseline;gap:8px}
@@ -1385,6 +1385,20 @@ textarea.input{resize:vertical;min-height:84px;line-height:1.45}
 .cabin[data-in="sheet"] .cabinTitle b{display:none}
 .cabin[data-in="sheet"] .cabinTitle{justify-content:flex-end}
 .seatBack b{font-size:10.5px;letter-spacing:-.01em}
+
+/* ── class plane: isolated and calmer (nothing from the page can show through or pile up inside it) ── */
+.rail{background:var(--paper)}
+.railCabin,.cabin{isolation:isolate}
+.fuselage{contain:paint;overflow-x:clip;border-color:color-mix(in srgb,var(--line) 70%,transparent);padding:0 10px 18px}
+.seatRow{gap:6px;margin-bottom:8px}
+.seatBack{height:32px;box-shadow:none;border-color:transparent;background:color-mix(in srgb,var(--ink) 6%,var(--paper))}
+.seat[data-me="1"] .seatBack{background:var(--paper);border-color:var(--ink)}
+.seat[data-on="0"]{opacity:.5}
+.seat[data-on="0"] .seatBelt{opacity:0}
+.seat.vacant{height:32px;border:1px dashed var(--line);opacity:.6;background:none}
+.seatBelt{height:3px;margin-top:5px}
+.cabinLegend{opacity:.8}
+.letters{opacity:.7}
 
 /* ── minecraft ── */
 .mcIcon{width:52px;height:52px;border-radius:16px;display:grid;place-items:center;margin-bottom:14px;background:var(--wash);color:var(--muted)}
@@ -1491,6 +1505,24 @@ textarea.input{resize:vertical;min-height:84px;line-height:1.45}
 .dmMsg{max-width:82%;padding:9px 14px;border-radius:18px 18px 18px 6px;background:var(--wash);white-space:pre-wrap;word-break:break-word;line-height:1.45;animation:lift .3s var(--ease) both}
 .dmMsg[data-me="1"]{align-self:flex-end;background:var(--accent);color:#fff;border-radius:18px 18px 6px 18px}
 .dmBar{display:flex;gap:8px;padding-top:12px;border-top:1px solid var(--line)}
+
+/* ── v11: calmer, flatter, roomier. No glow blobs, no hover gradients, no glass; one soft line instead of heavy cards ── */
+.bgfx{display:none}
+.spot::after,.heroCard::before{display:none}
+.rail,.side{backdrop-filter:none;-webkit-backdrop-filter:none;background:var(--bg)}
+.heroCard{background:none;border:0;border-bottom:1px solid var(--line);border-radius:0;box-shadow:none;padding:6px 0 22px;margin:2px 0 24px}
+.heroCard .h1{font-size:clamp(27px,3vw,36px);letter-spacing:-.02em}
+.heroCard .sub{color:var(--muted);max-width:34ch;line-height:1.5}
+.card,.ann,.note,.row{box-shadow:none}
+.row{border-radius:14px;padding:18px 20px 18px 24px}
+.group{margin-top:38px}
+.group h3{font-size:20px}
+.group h3 small{background:none;padding:0;color:var(--faint)}
+.ann{background:var(--wash);border:0;border-radius:14px;padding:12px 8px 12px 16px;margin-bottom:20px}
+.chip{border-radius:10px}
+.quickRow{display:flex;gap:2px;flex-wrap:wrap;margin:-8px 0 20px -10px}
+.quickRow .btn{background:none;border-color:transparent;color:var(--muted);padding-left:10px;padding-right:12px}
+.quickRow .btn:hover{color:var(--ink);background:var(--wash)}
 `;
 
 /* ───────────────────────── small pieces ───────────────────────── */
@@ -2741,7 +2773,7 @@ function TasksTab({ user, tasks, progress, completions, announcements, weeklies,
   const week = mine.filter((t) => { const n = diffDays(t.deadline); return n >= 0 && n <= 7; }).length;
   const overdue = overdueList.length, today = todayList.length;
   const reminders = [["Overdue", overdueList], ["Due today", todayList], ["Due tomorrow", tomorrowList]].filter(([, l]) => l.length);
-  const anns = [...announcements].sort((a, b) => b.at - a.at).slice(0, 2);
+  const anns = [...announcements].sort((a, b) => b.at - a.at).slice(0, 1);
   const hour = new Date().getHours();
   const greet = hour < 12 ? "Good morning" : hour < 18 ? "Good afternoon" : "Good evening";
   const kinds = [...new Set(tasks.map((t) => t.type))];
@@ -2790,7 +2822,7 @@ function TasksTab({ user, tasks, progress, completions, announcements, weeklies,
           <div className="heroDate">{new Date().toLocaleDateString(undefined, { weekday: "long", month: "long", day: "numeric" })}</div>
           <h1 className="h1">{greet}, {user}.</h1>
           <p className="sub">
-            {today + overdue === 0 ? "Nothing urgent right now." : `${today} due today${overdue ? `, ${overdue} overdue` : ""}.`}
+            {today + overdue === 0 ? "Nothing urgent right now." : `${today} due today${overdue ? `, ${overdue} overdue` : ""}.`}{week > 0 ? ` ${week} due in the next 7 days.` : ""}
           </p>
           <div className="heroChips">
             <span className={streak ? "streak" : "streak quiet"}><Flame size={14} />{streak ? `${streak}-day streak` : "Start a streak today"}</span>
@@ -2807,12 +2839,6 @@ function TasksTab({ user, tasks, progress, completions, announcements, weeklies,
           <button className="iconBtn" style={{ width: 28, height: 28, flex: "none" }} onClick={() => dismissAnn(a.id)} aria-label="Dismiss announcement"><X size={16} /></button>
         </div>
       ))}
-      {!hideNote && reminders.length > 0 && (
-        <div className="note" role="status">
-          <div>{reminders.map(([label, l]) => <p key={label}><span>{label}: </span>{summarize(l)}</p>)}</div>
-          <button className="iconBtn" style={{ width: 28, height: 28, flex: "none" }} onClick={() => setHideNote(true)} aria-label="Dismiss reminder"><X size={16} /></button>
-        </div>
-      )}
       {wkBanner && !hideWk && (
         <div className="note" role="status">
           <div>
@@ -2822,13 +2848,7 @@ function TasksTab({ user, tasks, progress, completions, announcements, weeklies,
           <button className="iconBtn" style={{ width: 28, height: 28, flex: "none" }} onClick={() => setHideWk(true)} aria-label="Dismiss"><X size={16} /></button>
         </div>
       )}
-      <div className="stats">
-        <Stat icon={<Hourglass size={18} />} n={overdue} label="Overdue" tone={overdue ? "bad" : ""} />
-        <Stat icon={<Target size={18} />} n={today} label="Due today" />
-        <Stat icon={<CalendarDays size={18} />} n={week} label="Next 7 days" />
-      </div>
-      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 16 }}>
-        <button className="btn ghost small" onClick={onPlan}>
+      <div className="quickRow">\1
           <Sparkles size={14} style={{ verticalAlign: -2, marginRight: 7 }} />Plan my evening
         </button>
         <button className="btn ghost small" onClick={openGroups}>
@@ -5039,7 +5059,7 @@ function Cabin({ me, cabin, tasks, completions, groups, subjects, onChat, inShee
     for (let c = 0; c < perRow; c++) {
       if (c === side) cells.push(<span key="aisle" className="aisle">{r + 1}</span>);
       const n = names[r * perRow + c];
-      cells.push(n ? seat(n) : <span key={`e${c}`} className="seat empty" aria-hidden="true" />);
+      cells.push(n ? seat(n) : <span key={`e${c}`} className="seat vacant" aria-hidden="true" />);
     }
     rowEls.push(<div className="seatRow" key={r} data-wing={r === 2 || r === 3 ? 1 : 0}>{cells}</div>);
   }
