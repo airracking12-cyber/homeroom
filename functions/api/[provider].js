@@ -9,8 +9,21 @@ export async function onRequestPost({ request, env, params }) {
   const token = (request.headers.get("Authorization") || "").replace(/^Bearer /, "");
   const who = await fetch(`${env.SUPABASE_URL}/auth/v1/user`, { headers: { apikey: env.SUPABASE_ANON_KEY, Authorization: `Bearer ${token}` } });
   if (!who.ok) return new Response("Sign in first", { status: 401 });
-  const body = await request.arrayBuffer();
+  let body = await request.arrayBuffer();
   if (body.byteLength > 30 * 1024 * 1024) return new Response("Too large", { status: 413 });
+  // Only the app's own settings are allowed through: the model is chosen here, and output length is capped.
+  try {
+    const j = JSON.parse(new TextDecoder().decode(body));
+    if (params.provider === "groq") {
+      j.model = env.GROQ_MODEL || "openai/gpt-oss-120b";
+      j.max_completion_tokens = Math.min(Number(j.max_completion_tokens) || 4096, 4096);
+      delete j.tools;
+    } else if (params.provider === "gemini") {
+      j.generationConfig = { ...(j.generationConfig || {}), maxOutputTokens: Math.min(Number(j.generationConfig?.maxOutputTokens) || 4096, 4096) };
+      delete j.tools;
+    }
+    body = new TextEncoder().encode(JSON.stringify(j));
+  } catch { return new Response("Bad request", { status: 400 }); }
 
   let upstream;
   const headers = { "Content-Type": "application/json" };

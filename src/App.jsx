@@ -4,10 +4,10 @@ import { useState, useEffect, useLayoutEffect, useMemo, useRef, useCallback } fr
 import {
   Plus, Check, X, ChevronLeft, ChevronRight, ArrowUp, Upload, Sparkles, Trash2,
   BookOpen, ListChecks, MessageCircle, Pencil, ChevronDown, CalendarDays,
-  List as ListIcon, Gamepad2, Shield, Copy, Search, Music,
+  List as ListIcon, Gamepad2, Copy, Search, Music,
   Camera, FolderPlus, Folder, BadgeCheck, RotateCcw, Flame, Timer, Play, Pause, Columns3, SlidersHorizontal,
   Lightbulb, CircleAlert, LogOut, Sun, Moon, Hourglass, Target, Inbox, Plane,
-  CheckCheck, GraduationCap, Brain, Layers, Shuffle,
+  CheckCheck, GraduationCap,
 } from "lucide-react";
 
 /* ───────────────────────── tokens (CSS variables, so dark mode just works) ───────────────────────── */
@@ -112,7 +112,7 @@ const timeAgo = (ts) => {
 };
 
 const summarize = (list) =>
-  list.slice(0, 3).map((t) => t.title).join(", ") + (list.length > 3 ? `and ${list.length - 3} more` : "");
+  list.slice(0, 3).map((t) => t.title).join(", ") + (list.length > 3 ? ` and ${list.length - 3} more` : "");
 
 /* ───────────────────────── storage ───────────────────────── */
 
@@ -394,7 +394,7 @@ async function extractFromFile(file) {
   return callClaude(system, [{ role: "user", content: [block, { type: "text", text: "Turn this into study notes." }] }]);
 }
 
-/* ───────────────────────── AI: Gemini first, Groq as the backup (keys live in src/keys.js) ───────────────────────── */
+/* ───────────────────────── AI: Gemini first, Groq as the backup (keys live on the server) ───────────────────────── */
 
 // The AI keys live on the server (functions/api/[provider].js), never in the browser.
 const GEMINI = "/api/gemini";

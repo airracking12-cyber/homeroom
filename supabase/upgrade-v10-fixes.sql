@@ -1,4 +1,11 @@
--- Lets a signed-in person delete their own account. Run this once in the Supabase SQL editor.
+-- Homeroom v10 fixes. Run ONCE in Supabase > SQL Editor on a project that is already running. Safe to run twice. Keeps all data.
+
+-- 1. Only signed-in people can add a class, and class ids must be plain (letters, numbers, dashes).
+drop policy if exists classes_add on public.classes;
+create policy classes_add on public.classes for insert to authenticated
+  with check (id ~ '^[a-z0-9-]{3,60}$' and length(label) between 3 and 40);
+
+-- 2. Deleting an account no longer touches other students' data when a username contains "_".
 create or replace function public.delete_my_account() returns void
 language plpgsql security definer set search_path = public, auth as $$
 declare uname text;

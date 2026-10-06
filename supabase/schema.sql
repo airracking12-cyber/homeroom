@@ -53,8 +53,8 @@ alter table public.feedback enable row level security;
 
 -- Classes: anyone can see the list and add a class
 create policy classes_read on public.classes for select to anon, authenticated using (true);
-create policy classes_add on public.classes for insert to anon, authenticated
-  with check (length(id) between 3 and 60 and length(label) between 3 and 40);
+create policy classes_add on public.classes for insert to authenticated
+  with check (id ~ '^[a-z0-9-]{3,60}$' and length(label) between 3 and 40);
 
 -- Only admins can change a class's quarter (everyone else can still add a class, which starts in quarter 1)
 create policy classes_admin_update on public.classes for update to authenticated using (public.is_admin()) with check (public.is_admin());
@@ -139,9 +139,10 @@ language plpgsql security definer set search_path = public, auth as $$
 declare uname text;
 begin
   if auth.uid() is null then raise exception 'Not signed in'; end if;
-  select username into uname from public.profiles where id = auth.uid() and is_admin = false;
-  if uname is null then raise exception 'This account cannot be deleted here'; end if;
-  delete from public.kv where key like 'u:' || uname || ':%';
+  if exists (select 1 from public.profiles where id = auth.uid() and is_admin = true) then raise exception 'This account cannot be deleted here'; end if;
+  select username into uname from public.profiles where id = auth.uid();
+  -- starts_with (not LIKE): "_" in a username is a LIKE wildcard and would delete other students' data
+  if uname is not null then delete from public.kv where starts_with(key, 'u:' || uname || ':'); end if;
   delete from public.feedback where user_id = auth.uid();
   delete from auth.users where id = auth.uid(); -- profile is removed by cascade
 end $$;
