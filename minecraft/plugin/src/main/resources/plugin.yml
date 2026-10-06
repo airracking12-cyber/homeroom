@@ -1,0 +1,20 @@
+name: HomeroomGate
+version: ${version}
+main: dev.homeroom.gate.HomeroomGate
+api-version: "26.1"
+description: Lets students join only while all their Homeroom tasks are done.
+author: Homeroom
+folia-supported: true
+commands:
+  homeroomgate:
+    description: Homeroom Gate admin commands
+    usage: /homeroomgate <reload|check <name>>
+    aliases: [hrgate]
+    permission: homeroomgate.admin
+permissions:
+  homeroomgate.admin:
+    description: Use /homeroomgate
+    default: op
+  homeroomgate.bypass:
+    description: Never blocked (also needs to be an operator at join time, see config)
+    default: false

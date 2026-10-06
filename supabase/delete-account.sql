@@ -4,9 +4,9 @@ language plpgsql security definer set search_path = public, auth as $$
 declare uname text;
 begin
   if auth.uid() is null then raise exception 'Not signed in'; end if;
-  select username into uname from public.profiles where id = auth.uid() and is_admin = false;
-  if uname is null then raise exception 'This account cannot be deleted here'; end if;
-  delete from public.kv where key like 'u:' || uname || ':%';
+  if exists (select 1 from public.profiles where id = auth.uid() and is_admin = true) then raise exception 'This account cannot be deleted here'; end if;
+  select username into uname from public.profiles where id = auth.uid();
+  if uname is not null then delete from public.kv where key like 'u:' || uname || ':%'; end if;
   delete from public.feedback where user_id = auth.uid();
   delete from auth.users where id = auth.uid(); -- profile is removed by cascade
 end $$;
