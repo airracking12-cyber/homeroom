@@ -9,6 +9,18 @@ export async function onRequestPost({ request, env, params }) {
   const token = (request.headers.get("Authorization") || "").replace(/^Bearer /, "");
   const who = await fetch(`${env.SUPABASE_URL}/auth/v1/user`, { headers: { apikey: env.SUPABASE_ANON_KEY, Authorization: `Bearer ${token}` } });
   if (!who.ok) return new Response("Sign in first", { status: 401 });
+  // Per-student rate limit (Cloudflare Workers Rate Limiting binding, see wrangler.jsonc). Keyed on the signed-in user, not the IP,
+  // because classmates share a school network. It is approximate and per Cloudflare location, so it guards against runaway use,
+  // not determined abuse. If the binding is missing or errors, let the request through rather than lock students out.
+  const me = await who.json().catch(() => null);
+  if (env.AI_LIMITER && me && me.id) {
+    try {
+      const { success } = await env.AI_LIMITER.limit({ key: `ai:${me.id}` });
+      if (!success) {
+        return new Response("Slow down a moment", { status: 429, headers: { "Retry-After": "60", "X-Homeroom-Limit": "1", "Cache-Control": "no-store" } });
+      }
+    } catch (err) { console.warn("[ai] rate limiter unavailable, allowing the request:", err); }
+  }
   let body = await request.arrayBuffer();
   if (body.byteLength > 30 * 1024 * 1024) return new Response("Too large", { status: 413 });
   // Only the app's own settings are allowed through: the model is chosen here, and output length is capped.

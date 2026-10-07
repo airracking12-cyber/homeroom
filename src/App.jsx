@@ -1,5 +1,12 @@
 import { supabase } from "./supabaseClient";
+import ErrorBoundary from "./ErrorBoundary.jsx";
 import { MINECRAFT } from "./minecraft.config.js";
+import { sniffFile } from "./sniffImage.js";
+import { pad, toISO, todayISO, parse, addDays, diffDays, fmtDate, todayLong, relLabel, weekStartOf, weekLabel, weekData, timeAgo } from "./lib/dates.js";
+import { setAuthHeaders, callClaude, streamClaude, parseJSON } from "./lib/ai.js";
+import { SUBJ, SUBJ_REG, subjColor, SWATCHES, EMAIL_RE, TYPES, REVIEW_TYPES, QUARTERS, MAX_PROOF, needsProofType, wantsProof, PRIORITIES, STATUSES, DEFAULT_SUBJECTS, statusLabel } from "./lib/constants.js";
+import { LS, createStore } from "./lib/store.js";
+import { createDebouncedSaver } from "./lib/debounce.js";
 import { useState, useEffect, useLayoutEffect, useMemo, useRef, useCallback } from "react";
 import {
   Plus, Check, X, ChevronLeft, ChevronRight, ArrowUp, Upload, Sparkles, Trash2,
@@ -22,19 +29,6 @@ const C = {
 const SERIF = `"Fraunces","Iowan Old Style","Palatino Linotype",Palatino,"Book Antiqua",Georgia,serif`;
 const SANS = `"Inter",-apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif`;
 
-const SUBJ = {
-  Mathematics: "#5A7FA8",
-  "Values Education": "#B38A2E",
-  "Araling Panlipunan": "#8A877A",
-  Filipino: "#5F8B6D",
-};
-
-const PAL = ["#C4684A", "#8B6B86", "#4F8A8B", "#9A7B4F", "#6E7FA3"];
-// Subjects your class adds (with the colour they picked) are copied in here, so subjColor() works everywhere.
-const SUBJ_REG = { ...SUBJ };
-const subjColor = (s) =>
-  SUBJ_REG[s] || PAL[[...(s || "x")].reduce((a, c) => a + c.charCodeAt(0), 0) % PAL.length];
-const SWATCHES = ["#5A7FA8", "#5F8B6D", "#B38A2E", "#C4623F", "#8B6B86", "#4F8A8B", "#B5586B", "#7A8F3E", "#6E7FA3", "#8A877A", "#3F6E8C", "#9A7B4F"];
 
 // Accounts sign in with a real email and password. The username is the display name shown to the class.
 // When someone lands here from an email link, work out what happened so the sign-in screen can say so.
@@ -47,7 +41,7 @@ const LINK_NOTICE = (() => {
         ? "That email link has expired or was already used. Try signing in. If that fails, use \"Forgot your password?\" or create the account again." : "That email link didn't work. Try signing in." };
     }
     if (type === "signup" || type === "email" || type === "invite") return { info: "Email confirmed. Sign in below." };
-  } catch {}
+  } catch (err) { console.warn("[Homeroom] non-fatal:", err); }
   return {};
 })();
 const CONFIRMED = (() => {
@@ -56,129 +50,18 @@ const CONFIRMED = (() => {
     return !q.get("error") && !q.get("error_code") && ["signup", "email", "invite"].includes(q.get("type"));
   } catch { return false; }
 })();
-const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
 
-const TYPES = ["Homework", "Mini Task", "Quiz", "Study", "Project", "Exam"];
-const REVIEW_TYPES = ["Quiz", "Study", "Exam"];
-const QUARTERS = [1, 2, 3, 4];
-const MAX_PROOF = 6;
-// Quizzes, study sessions and exams are things you review for, so they never ask for a photo.
-const needsProofType = (t) => !REVIEW_TYPES.includes(t.type);
-const wantsProof = (t) => needsProofType(t) && t.proof !== false;
-const PRIORITIES = ["High", "Medium", "Low"];
-const STATUSES = [["todo", "Not started"], ["progress", "In progress"], ["done", "Done"]];
-const DEFAULT_SUBJECTS = Object.keys(SUBJ);
 
 /* ───────────────────────── dates ───────────────────────── */
+/* date helpers live in ./lib/dates.js */
 
-const pad = (n) => String(n).padStart(2, "0");
-const toISO = (d) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
-const todayISO = () => toISO(new Date());
-const parse = (iso) => { const [y, m, d] = iso.split("-").map(Number); return new Date(y, m - 1, d); };
-const addDays = (iso, n) => { const d = parse(iso); d.setDate(d.getDate() + n); return toISO(d); };
-const diffDays = (iso) => Math.round((parse(iso) - parse(todayISO())) / 864e5);
-const fmtDate = (iso) => parse(iso).toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" });
-const todayLong = () => parse(todayISO()).toLocaleDateString("en-US", { weekday: "long", year: "numeric", month: "long", day: "numeric" });
-const relLabel = (iso) => {
-  const n = diffDays(iso);
-  if (n === -1) return "Yesterday";
-  if (n < -1) return `${-n} days ago`;
-  if (n === 0) return "Today";
-  if (n === 1) return "Tomorrow";
-  if (n < 7) return parse(iso).toLocaleDateString(undefined, { weekday: "long" });
-  return fmtDate(iso);
-};
-const fmtShort = (iso) => parse(iso).toLocaleDateString(undefined, { month: "short", day: "numeric" });
-const weekStartOf = (iso) => { const d = parse(iso); d.setDate(d.getDate() - ((d.getDay() + 6) % 7)); return toISO(d); }; // weeks start Monday
-const weekLabel = (ws) => `${fmtShort(ws)} to ${fmtShort(addDays(ws, 6))}`;
-
-function weekData(ws, tasks, materials) {
-  const we = addDays(ws, 6);
-  const ts = tasks.filter((t) => t.deadline >= ws && t.deadline <= we);
-  const ids = new Set(ts.map((t) => t.id));
-  const from = parse(ws).getTime(), to = parse(addDays(ws, 7)).getTime();
-  const ms = materials.filter((m) => ids.has(m.taskId) || (m.at >= from && m.at < to));
-  return { ts, ms };
-}
-
-const timeAgo = (ts) => {
-  const m = Math.round((Date.now() - ts) / 60000);
-  if (m < 1) return "Just now";
-  if (m < 60) return `${m} min ago`;
-  const h = Math.round(m / 60);
-  if (h < 24) return `${h} hr ago`;
-  const d = Math.round(h / 24);
-  return d === 1 ? "Yesterday" : `${d} days ago`;
-};
 
 const summarize = (list) =>
   list.slice(0, 3).map((t) => t.title).join(", ") + (list.length > 3 ? ` and ${list.length - 3} more` : "");
 
 /* ───────────────────────── storage ───────────────────────── */
 
-const LS = "hr:";
-const store = {
-  async get(key, shared = false) {
-    if (!shared) {
-      try { const v = localStorage.getItem(LS + key); return v ? JSON.parse(v) : null; } catch { return null; }
-    }
-    try {
-      const { data, error } = await supabase.from("kv").select("value").eq("key", key).maybeSingle();
-      if (error) { console.error("kv get failed", error); return null; }
-      return data ? data.value : null;
-    } catch { return null; }
-  },
-  async set(key, val, shared = false) {
-    if (!shared) {
-      try { localStorage.setItem(LS + key, JSON.stringify(val)); return true; } catch { return false; }
-    }
-    try {
-      const { error } = await supabase
-        .from("kv")
-        .upsert({ key, value: val, updated_at: new Date().toISOString() });
-      if (error) { console.error("kv set failed", error); return false; }
-      return true;
-    } catch (e) { console.error("kv set failed", e); return false; }
-  },
-  async del(key, shared = false) {
-    if (!shared) { try { localStorage.removeItem(LS + key); } catch {} return; }
-    try { await supabase.from("kv").delete().eq("key", key); } catch {}
-  },
-  // Read, change, write back; if someone else saved in between, try again (so nobody's change is lost).
-  async update(key, fn, empty = []) {
-    for (let i = 0; i < 6; i++) {
-      const { data, error } = await supabase.from("kv").select("value,version").eq("key", key).maybeSingle();
-      if (error) { console.error("kv read failed", error); return false; }
-      const next = fn(data ? data.value : empty);
-      if (!data) {
-        const r = await supabase.from("kv").insert({ key, value: next, version: 1 });
-        if (!r.error) return true;
-        continue;
-      }
-      const r = await supabase.from("kv").update({ value: next, version: data.version + 1, updated_at: new Date().toISOString() }).eq("key", key).eq("version", data.version).select("key");
-      if (r.error) { console.error("kv write failed", r.error); return false; }
-      if (r.data && r.data.length) return true;
-    }
-    return false;
-  },
-  classes: {
-    async list() {
-      let r = await supabase.from("classes").select("id,year,name,label,quarter").order("label");
-      if (r.error) r = await supabase.from("classes").select("id,year,name,label").order("label"); // database not upgraded to v8 yet: still show the classes
-      return r.data || [];
-    },
-    async add(c) {
-      await supabase.from("classes").upsert(c, { onConflict: "id", ignoreDuplicates: true });
-    },
-  },
-  async listShared(prefix) {
-    try {
-      const { data, error } = await supabase.from("kv").select("key,value").like("key", `${prefix}%`);
-      if (error) return [];
-      return data || [];
-    } catch { return []; }
-  },
-};
+const store = createStore(supabase);
 
 async function loadProfile(id) {
   const { data } = await supabase.from("profiles").select("username,class_id,is_admin").eq("id", id).maybeSingle();
@@ -188,6 +71,7 @@ async function authHeaders() {
   const { data } = await supabase.auth.getSession();
   return { "Content-Type": "application/json", Authorization: "Bearer " + (data?.session?.access_token || "") };
 }
+setAuthHeaders(authHeaders);
 
 const sha = async (s) => {
   const b = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(s));
@@ -197,7 +81,7 @@ const randHex = () => [...crypto.getRandomValues(new Uint8Array(8))].map((x) => 
 const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
 
 async function copyText(text) {
-  try { await navigator.clipboard.writeText(text); return true; } catch {}
+  try { await navigator.clipboard.writeText(text); return true; } catch (err) { console.warn("[Homeroom] non-fatal:", err); }
   try {
     const ta = document.createElement("textarea");
     ta.value = text; ta.style.position = "fixed"; ta.style.opacity = "0";
@@ -321,7 +205,7 @@ const Sound = (() => {
   };
 
   return {
-    play(name) { if (!sfxOn || !ensure()) return; try { SFX[name] && SFX[name](ctx.currentTime + 0.001); } catch {} },
+    play(name) { if (!sfxOn || !ensure()) return; try { SFX[name] && SFX[name](ctx.currentTime + 0.001); } catch (err) { console.warn("[Homeroom] non-fatal:", err); } },
     setSfx(v) { sfxOn = v; },
     setVolume(v) { vol = v; if (ctx && musicBus) musicBus.gain.setTargetAtTime(musicOn ? vol * 0.9 : 0, ctx.currentTime, 0.1); },
     startMusic() {
@@ -374,8 +258,15 @@ const safePart = (x) => String(x).replace(/[^A-Za-z0-9_-]/g, "_");
 // Shrinks the photo and uploads it to the PRIVATE task-proofs bucket. Returns the file's path, not a link:
 // links are only made on demand (see ProofThumbs) and only for the student who sent it and the admin.
 async function uploadProof(file, path) {
-  let body = file, type = file.type || "image/jpeg";
-  try { body = await compressImage(file); type = "image/jpeg"; } catch { /* unreadable format: upload as is */ }
+  let body, type;
+  try { body = await compressImage(file); type = "image/jpeg"; } catch (err) {
+    // The browser couldn't read it (for example HEIC in a browser without HEIC support). Only send the original if its first
+    // bytes really are an image, and label it by what it is, not by what the file claimed to be.
+    console.warn("[Homeroom] photo sent without re-encoding:", err);
+    const real = await sniffFile(file);
+    if (!real) throw Object.assign(new Error("not an image"), { notImage: true });
+    body = file; type = real;
+  }
   const { error } = await supabase.storage.from("task-proofs").upload(path, body, { contentType: type, cacheControl: "3600" });
   if (error) throw error;
   return path;
@@ -397,121 +288,8 @@ async function extractFromFile(file) {
 /* ───────────────────────── AI: Gemini first, Groq as the backup (keys live on the server) ───────────────────────── */
 
 // The AI keys live on the server (functions/api/[provider].js), never in the browser.
-const GEMINI = "/api/gemini";
-const GROQ = "/api/groq";
-const GROQ_MODEL = "openai/gpt-oss-120b";
+/* the study-assistant client lives in ./lib/ai.js */
 
-function toGemini(system, messages) {
-  const contents = messages.map((m) => ({
-    role: m.role === "user" ? "user" : "model",
-    parts: (Array.isArray(m.content) ? m.content : [{ type: "text", text: m.content }]).map((b) =>
-      b.type === "image" || b.type === "document"
-        ? { inline_data: { mime_type: b.source.media_type, data: b.source.data } }
-        : { text: b.text }
-    ),
-  }));
-  while (contents.length && contents[0].role !== "user") contents.shift(); // Gemini wants the chat to start with the student
-  return { system_instruction: { parts: [{ text: system }] }, contents, generationConfig: { maxOutputTokens: 4096 } };
-}
-
-// Groq can't read photos or PDFs here, so those requests only ever go to Gemini.
-const hasMedia = (messages) => messages.some((m) => Array.isArray(m.content) && m.content.some((b) => b.type !== "text"));
-
-function toGroq(system, messages, stream) {
-  const msgs = messages.map((m) => ({
-    role: m.role === "user" ? "user" : "assistant",
-    content: Array.isArray(m.content) ? m.content.map((b) => b.text || "").join("\n") : m.content,
-  }));
-  while (msgs.length && msgs[0].role !== "user") msgs.shift();
-  return { model: GROQ_MODEL, messages: [{ role: "system", content: system }, ...msgs], max_completion_tokens: 4096, reasoning_effort: "low", stream };
-}
-
-const geminiText = (data) => (data?.candidates?.[0]?.content?.parts || []).map((x) => x.text || "").join("");
-
-async function geminiCall(system, messages) {
-  const res = await fetch(`${GEMINI}?mode=generate`, {
-    method: "POST", headers: await authHeaders(),
-    body: JSON.stringify(toGemini(system, messages)),
-  });
-  if (!res.ok) throw new Error(`Gemini ${res.status}`);
-  const text = geminiText(await res.json());
-  if (!text) throw new Error("Gemini empty");
-  return text;
-}
-
-async function groqCall(system, messages) {
-  const res = await fetch(GROQ, {
-    method: "POST", headers: await authHeaders(),
-    body: JSON.stringify(toGroq(system, messages, false)),
-  });
-  if (!res.ok) throw new Error(`Groq ${res.status}`);
-  const text = (await res.json())?.choices?.[0]?.message?.content || "";
-  if (!text) throw new Error("Groq empty");
-  return text;
-}
-
-// Reads a server-sent-events stream and calls pick(parsedLine) for each data line.
-async function readSSE(res, pick, onText) {
-  if (!res.ok || !res.body) throw new Error(`stream ${res.status}`);
-  const reader = res.body.getReader();
-  const dec = new TextDecoder();
-  let buf = "", full = "";
-  for (;;) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    buf += dec.decode(value, { stream: true });
-    const lines = buf.split("\n");
-    buf = lines.pop();
-    for (const line of lines) {
-      if (!line.startsWith("data:")) continue;
-      const d = line.slice(5).trim();
-      if (!d || d === "[DONE]") continue;
-      try { full += pick(JSON.parse(d)); onText(full); } catch { /* partial line */ }
-    }
-  }
-  if (!full) throw new Error("empty stream");
-  return full;
-}
-
-const busy = () => new Error("The AI is busy right now. Try again in a minute.");
-
-async function callClaude(system, messages) {
-  { try { return await geminiCall(system, messages); } catch (e) { console.warn("Gemini failed, trying Groq", e); } }
-  if (!hasMedia(messages)) { try { return await groqCall(system, messages); } catch (e) { console.warn("Groq failed", e); } }
-  throw busy();
-}
-
-// Streams text as it is written. Gemini first; if it fails or hits its free limit, Groq takes over.
-async function streamClaude(system, messages, onText) {
-  {
-    try {
-      const res = await fetch(`${GEMINI}?mode=stream`, {
-        method: "POST", headers: await authHeaders(),
-        body: JSON.stringify(toGemini(system, messages)),
-      });
-      return await readSSE(res, geminiText, onText);
-    } catch (e) { console.warn("Gemini stream failed, trying Groq", e); }
-  }
-  if (!hasMedia(messages)) {
-    try {
-      const res = await fetch(GROQ, {
-        method: "POST", headers: await authHeaders(),
-        body: JSON.stringify(toGroq(system, messages, true)),
-      });
-      return await readSSE(res, (d) => d?.choices?.[0]?.delta?.content || "", onText);
-    } catch (e) { console.warn("Groq stream failed", e); }
-  }
-  throw busy();
-}
-
-function parseJSON(t) {
-  const s = (t || "").replace(/```json|```/g, "").trim();
-  const a = s.indexOf("{"), b = s.lastIndexOf("}");
-  if (a < 0 || b < 0) return null;
-  try { return JSON.parse(s.slice(a, b + 1)); } catch { return null; }
-}
-
-const statusLabel = (s) => (STATUSES.find((x) => x[0] === (s || "todo")) || STATUSES[0])[1];
 
 function buildContext(tasks, materials, progress, user, kb) {
   const list = tasks
@@ -527,6 +305,18 @@ function buildContext(tasks, materials, progress, user, kb) {
 }
 
 /* ───────────────────────── styles ───────────────────────── */
+
+/* The unboxing. While the welcome tour runs, every piece of the app that has a data-rv token is still "in the box":
+   invisible, but holding its place. The tour hands the list of unpacked tokens to the root (data-unbox), and each
+   piece pops into its own spot the moment its token appears. Listed in the order the tour unwraps them. */
+const UNBOX_TOKENS = [
+  "logo", "chip", "t-tasks", "hero", "quick", "views", "list", "side", "new",
+  "t-done", "p-done", "t-review", "p-review", "t-ask", "p-ask", "cabin", "search", "acct", "music",
+];
+const UNBOX_CSS = UNBOX_TOKENS.map((t, k) =>
+  `.hr[data-unbox]:not([data-unbox~="${t}"]) [data-rv="${t}"]{visibility:hidden!important;opacity:0!important;pointer-events:none!important}` +
+  `.hr[data-unbox~="${t}"] [data-rv="${t}"]{animation:unboxPop 1s var(--ease) ${240 + ((k * 37) % 7) * 70}ms backwards}`
+).join("");
 
 const CSS = `
 *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
@@ -574,8 +364,8 @@ body{margin:0}
 .rail{position:relative;flex-direction:column;gap:4px;padding:22px 14px 18px;border-right:1px solid var(--line);background:color-mix(in srgb,var(--paper) 55%,transparent);backdrop-filter:blur(16px);z-index:6}
 .railLogo{height:44px;display:flex;align-items:center;justify-content:center;margin-bottom:16px}
 .railLogo .logoFull{display:none}
-.railLogo .logoMini{font-size:26px;width:44px;height:44px;border-radius:14px;display:grid;place-items:center;background:var(--ink);color:var(--bg)}
-.nav{position:relative;z-index:1;display:flex;flex-direction:column;align-items:center;gap:4px;padding:11px 0;border:0;background:none;border-radius:16px;font-size:11.5px;font-weight:500;color:var(--muted);transition:background .25s var(--ease),color .2s,transform .25s var(--ease)}
+.railLogo .logoMini{font-size:28px;width:44px;height:44px;border-radius:14px;display:grid;place-items:center;background:var(--ink);color:var(--bg)}
+.nav{position:relative;z-index:1;display:flex;flex-direction:column;align-items:center;gap:4px;padding:11px 0;border:0;background:none;border-radius:16px;font-size:12px;font-weight:500;color:var(--muted);transition:background .25s var(--ease),color .2s,transform .25s var(--ease)}
 .nav svg{transition:transform .3s var(--spring),color .2s}
 .nav:active{transform:scale(.96)}
 @media (hover:hover){.nav:hover{background:var(--wash);color:var(--ink)}.nav:hover svg{transform:scale(1.08)}}
@@ -588,15 +378,15 @@ body{margin:0}
 @media (min-width:1180px){
   .railLogo{justify-content:flex-start;padding-left:6px}
   .railLogo .logoMini{display:none}
-  .railLogo .logoFull{display:block;font-size:26px}
-  .nav{flex-direction:row;justify-content:flex-start;gap:13px;padding:12px 16px;font-size:14.5px}
+  .railLogo .logoFull{display:block;font-size:28px}
+  .nav{flex-direction:row;justify-content:flex-start;gap:13px;padding:12px 16px;font-size:15px}
   .nav .badge{top:50%;margin-top:-9px;left:auto;right:14px}
 }
 
 /* ── header ── */
 .head{position:relative;z-index:5;display:flex;align-items:center;justify-content:space-between;gap:14px;padding:16px max(20px,calc((100% - var(--maxw))/2)) 10px}
 .headL{display:flex;align-items:center;gap:10px;min-width:0}
-.mark{font-family:${SERIF};font-size:23px;letter-spacing:-.025em}
+.mark{font-family:${SERIF};font-size:24px;letter-spacing:-.025em}
 .classChip{align-items:center;padding:5px 12px;border-radius:999px;background:var(--wash);color:var(--muted);font-size:13px;font-weight:500}
 .avatar{width:36px;height:36px;border-radius:50%;border:1px solid var(--line);background:var(--paper);font-family:${SERIF};font-size:15px;display:grid;place-items:center;box-shadow:var(--shadow-sm);transition:transform .25s var(--spring)}
 button.avatar:active{transform:scale(.92)}
@@ -604,16 +394,16 @@ button.avatar:active{transform:scale(.92)}
 .hdrBtn{display:inline-flex;align-items:center;justify-content:center;gap:6px;width:38px;height:38px;border:1px solid var(--line);background:var(--paper);border-radius:50%;color:var(--muted);padding:0;box-shadow:var(--shadow-sm);transition:background .2s,transform .25s var(--spring),color .2s,border-color .2s}
 .hdrBtn:active{transform:scale(.92)}
 @media (hover:hover){.hdrBtn:hover{color:var(--ink);background:var(--wash)}}
-.hdrBtn span{display:none;font-size:13.5px}
+.hdrBtn span{display:none;font-size:14px}
 @media (min-width:440px){.hdrBtn.wide{width:auto;padding:0 14px;border-radius:999px}.hdrBtn.wide span{display:inline}}
 .searchPill{align-items:center;gap:10px;min-width:280px;padding:9px 14px;border:1px solid var(--line);background:var(--paper);border-radius:13px;color:var(--faint);font-size:14px;box-shadow:var(--shadow-sm);transition:border-color .2s,box-shadow .25s var(--ease)}
 @media (hover:hover){.searchPill:hover{border-color:var(--accent-line);box-shadow:var(--shadow)}}
 .searchPill span{flex:1;text-align:left}
-.kbd{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:11.5px;color:var(--muted);background:var(--wash);border-radius:6px;padding:2px 7px}
+.kbd{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px;color:var(--muted);background:var(--wash);border-radius:6px;padding:2px 7px}
 
 /* ── phone nav + fab ── */
 .tabs{position:absolute;left:14px;right:14px;bottom:calc(10px + env(safe-area-inset-bottom));display:flex;gap:2px;background:var(--glass);backdrop-filter:blur(20px) saturate(1.6);-webkit-backdrop-filter:blur(20px) saturate(1.6);border:1px solid var(--line);border-radius:24px;padding:6px;box-shadow:var(--shadow);z-index:4}
-.tab{position:relative;z-index:1;flex:1;background:none;border:0;border-radius:18px;display:flex;flex-direction:column;align-items:center;gap:3px;padding:8px 0 7px;font-size:11.5px;font-weight:500;color:var(--faint);transition:background .3s var(--ease),color .2s}
+.tab{position:relative;z-index:1;flex:1;background:none;border:0;border-radius:18px;display:flex;flex-direction:column;align-items:center;gap:3px;padding:8px 0 7px;font-size:12px;font-weight:500;color:var(--faint);transition:background .3s var(--ease),color .2s}
 .tab svg{transition:transform .35s var(--spring)}
 .tab[aria-current="page"]{color:var(--ink)}
 .tab[aria-current="page"] svg{color:var(--accent);transform:translateY(-1px) scale(1.08)}
@@ -639,7 +429,7 @@ button.avatar:active{transform:scale(.92)}
 .ring .bg{stroke:var(--line)}
 .ring .fg{stroke:var(--accent);transition:stroke-dashoffset 1.1s var(--ease)}
 .ring .lbl{position:absolute;inset:0;display:grid;place-content:center;text-align:center;line-height:1.1}
-.ring .lbl b{font-family:${SERIF};font-weight:400;font-size:26px;letter-spacing:-.02em}
+.ring .lbl b{font-family:${SERIF};font-weight:400;font-size:28px;letter-spacing:-.02em}
 .ring .lbl span{font-size:11px;color:var(--muted);margin-top:2px}
 .stats{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;padding:16px 0 14px;border:0;margin:0}
 /* ── controls ── */
@@ -713,7 +503,7 @@ textarea.input{resize:vertical;min-height:84px;line-height:1.45}
 .late{color:var(--danger)}
 .pri{color:var(--faint);margin-top:2px;font-weight:400}
 .pri[data-p="High"]{color:var(--accent)}
-.empty::before{content:"";display:block;width:128px;height:98px;margin:0 auto 16px;background:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='128' height='98' viewBox='0 0 120 92' fill='none'%3E%3Crect x='18' y='20' width='84' height='56' rx='14' fill='%23C4694A' fill-opacity='.12'/%3E%3Crect x='28' y='12' width='64' height='56' rx='14' fill='%23C4694A' fill-opacity='.07' stroke='%23C4694A' stroke-opacity='.4' stroke-width='1.5'/%3E%3Ccircle cx='60' cy='40' r='13' fill='%23C4694A' fill-opacity='.16'/%3E%3Cpath d='M53 40.5l5 5 9-10' stroke='%23C4694A' stroke-width='3' stroke-linecap='round' stroke-linejoin='round'/%3E%3Ccircle cx='100' cy='18' r='3' fill='%23C4694A' fill-opacity='.55'/%3E%3Ccircle cx='14' cy='64' r='2.5' fill='%23C4694A' fill-opacity='.45'/%3E%3Cpath d='M104 50l2 5 5 2-5 2-2 5-2-5-5-2 5-2z' fill='%23C4694A' fill-opacity='.4'/%3E%3C/svg%3E") center/contain no-repeat;animation:floaty 5s ease-in-out infinite}
+.empty::before{content:"";display:block;width:128px;height:98px;margin:0 auto 16px;background:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='128' height='98' viewBox='0 0 120 92' fill='none'%3E%3Crect x='18' y='20' width='84' height='56' rx='14' fill='%23D97757' fill-opacity='.12'/%3E%3Crect x='28' y='12' width='64' height='56' rx='14' fill='%23D97757' fill-opacity='.07' stroke='%23C4694A' stroke-opacity='.4' stroke-width='1.5'/%3E%3Ccircle cx='60' cy='40' r='13' fill='%23D97757' fill-opacity='.16'/%3E%3Cpath d='M53 40.5l5 5 9-10' stroke='%23C4694A' stroke-width='3' stroke-linecap='round' stroke-linejoin='round'/%3E%3Ccircle cx='100' cy='18' r='3' fill='%23D97757' fill-opacity='.55'/%3E%3Ccircle cx='14' cy='64' r='2.5' fill='%23D97757' fill-opacity='.45'/%3E%3Cpath d='M104 50l2 5 5 2-5 2-2 5-2-5-5-2 5-2z' fill='%23D97757' fill-opacity='.4'/%3E%3C/svg%3E") center/contain no-repeat}
 .empty.plain::before{display:none}
 .empty{padding:48px 8px;text-align:center;color:var(--muted);animation:lift .5s var(--ease) both}
 .empty .serif{font-size:22px;color:var(--ink);margin-bottom:6px}
@@ -744,7 +534,7 @@ textarea.input{resize:vertical;min-height:84px;line-height:1.45}
 .mini div{min-width:0;flex:1}
 .sbar{margin-bottom:12px}
 .sbar:last-child{margin-bottom:0}
-.sbar>div:first-child{display:flex;justify-content:space-between;font-size:13.5px;margin-bottom:6px}
+.sbar>div:first-child{display:flex;justify-content:space-between;font-size:14px;margin-bottom:6px}
 .sbar .t{height:6px;border-radius:3px;background:var(--wash);overflow:hidden}
 .sbar .t i{display:block;height:100%;border-radius:3px;transition:width 1s var(--ease)}
 .inspector{animation:slideIn .5s var(--ease) both}
@@ -767,12 +557,12 @@ textarea.input{resize:vertical;min-height:84px;line-height:1.45}
 /* ── lists, notes, chat ── */
 .mat{border-bottom:1px solid var(--line)}
 .matHead{width:100%;display:flex;justify-content:space-between;gap:10px;align-items:center;background:none;border:0;padding:14px 0;text-align:left}
-.matBody{white-space:pre-wrap;color:var(--body);padding:0 0 16px;font-size:14.5px;line-height:1.6}
+.matBody{white-space:pre-wrap;color:var(--body);padding:0 0 16px;font-size:15px;line-height:1.6}
 .chat{display:flex;flex-direction:column;height:100%;min-height:0}
 .msgs{flex:1;overflow-y:auto;padding:4px max(20px,calc((100% - 780px)/2)) 12px}
 .msg{margin:16px 0;max-width:88%;white-space:pre-wrap;line-height:1.55;animation:lift .4s var(--ease) both}
 .msg.me{margin-left:auto;background:var(--accent);color:#fff;padding:10px 15px;border-radius:20px 20px 6px 20px}
-.msg.ai{font-family:${SERIF};font-size:17px;line-height:1.6}
+.msg.ai{font-family:${SERIF};font-size:18px;line-height:1.6}
 .added{margin-top:10px;border-left:2px solid var(--accent);padding:2px 0 2px 12px;font-family:${SANS};font-size:14px;color:var(--muted)}
 .added b{display:block;color:var(--ink);font-weight:550}
 .composer{display:flex;gap:10px;align-items:flex-end;padding:10px max(16px,calc((100% - 780px)/2)) calc(96px + env(safe-area-inset-bottom));border-top:1px solid var(--line);background:var(--glass);backdrop-filter:blur(14px)}
@@ -783,7 +573,7 @@ textarea.input{resize:vertical;min-height:84px;line-height:1.45}
 .send:active{transform:scale(.88)}
 .send:disabled{background:var(--line);color:var(--faint)}
 .suggest{display:flex;flex-direction:column;align-items:flex-start;gap:8px;margin-top:18px}
-.suggest button{border:1px solid var(--line);background:var(--paper);border-radius:16px;padding:10px 15px;font-size:14.5px;text-align:left;color:var(--ink);box-shadow:var(--shadow-sm);transition:transform .3s var(--ease),border-color .2s}
+.suggest button{border:1px solid var(--line);background:var(--paper);border-radius:16px;padding:10px 15px;font-size:15px;text-align:left;color:var(--ink);box-shadow:var(--shadow-sm);transition:transform .3s var(--ease),border-color .2s}
 @media (hover:hover){.suggest button:hover{transform:translateX(4px);border-color:var(--accent-line)}}
 .opt{width:100%;text-align:left;border:1px solid var(--line);background:var(--paper);border-radius:16px;padding:14px 16px;margin-bottom:10px;font-size:15px;display:flex;gap:12px;box-shadow:var(--shadow-sm);transition:border-color .2s,background .25s,transform .25s var(--spring)}
 .opt:active{transform:scale(.99)}
@@ -795,11 +585,11 @@ textarea.input{resize:vertical;min-height:84px;line-height:1.45}
 .bar{height:5px;background:var(--line);border-radius:3px;overflow:hidden;margin:6px 0 22px}
 .bar i{display:block;height:100%;background:var(--accent);border-radius:3px;transition:width .6s var(--ease)}
 .note{border:1px solid var(--accent-line);background:var(--accent-soft);border-radius:18px;padding:12px 8px 12px 16px;margin:0 0 14px;display:flex;justify-content:space-between;gap:8px;animation:lift .5s var(--ease) both}
-.note p{margin:0 0 6px;color:var(--muted);font-size:14.5px;line-height:1.5}
+.note p{margin:0 0 6px;color:var(--muted);font-size:15px;line-height:1.5}
 .note p span{color:var(--ink);font-weight:550}
 .ann{background:var(--paper);border:1px solid var(--line);box-shadow:var(--shadow-sm);border-radius:20px;padding:15px 8px 15px 18px;margin-bottom:14px;display:flex;justify-content:space-between;gap:8px;animation:lift .5s var(--ease) both}
-.ann small{display:block;font-size:12.5px;color:var(--muted);margin-bottom:4px}
-.ann p{margin:0;font-family:${SERIF};font-size:17px;line-height:1.5;white-space:pre-wrap}
+.ann small{display:block;font-size:13px;color:var(--muted);margin-bottom:4px}
+.ann p{margin:0;font-family:${SERIF};font-size:18px;line-height:1.5;white-space:pre-wrap}
 .cal{display:grid;grid-template-columns:repeat(7,1fr);gap:4px;margin-top:12px}
 .calHead{font-size:12px;font-weight:500;color:var(--faint);text-align:center;padding:6px 0}
 .day{border:1px solid transparent;background:none;border-radius:16px;display:flex;flex-direction:column;align-items:center;gap:4px;padding:7px 0 9px;font-size:14px;min-height:56px;transition:background .25s var(--ease),border-color .2s}
@@ -818,13 +608,13 @@ textarea.input{resize:vertical;min-height:84px;line-height:1.45}
 .cmtIn{display:flex;gap:8px;align-items:flex-end;margin-top:14px}
 .cmtIn textarea{flex:1;min-height:44px;max-height:110px;resize:none;border:1px solid var(--line);background:var(--paper);border-radius:16px;padding:10px 14px;line-height:1.4}
 .fcard{width:100%;min-height:240px;border:1px solid var(--line);background:var(--paper);border-radius:24px;padding:30px 26px;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;gap:14px;box-shadow:var(--shadow);transition:transform .4s var(--ease)}
-.fcard .t{font-family:${SERIF};font-size:23px;line-height:1.4;animation:fade .35s var(--ease)}
+.fcard .t{font-family:${SERIF};font-size:24px;line-height:1.4;animation:fade .35s var(--ease)}
 .fcard .k{font-size:13px;color:var(--muted)}
 
 /* ── feedback bits ── */
-.toast{position:absolute;left:20px;right:84px;bottom:calc(92px + env(safe-area-inset-bottom));z-index:20;background:var(--ink);color:var(--bg);border-radius:16px;padding:12px 16px;display:flex;justify-content:space-between;align-items:center;gap:10px;font-size:14.5px;animation:toastIn .5s var(--spring) both;box-shadow:var(--shadow)}
+.toast{position:absolute;left:20px;right:84px;bottom:calc(92px + env(safe-area-inset-bottom));z-index:20;background:var(--ink);color:var(--bg);border-radius:16px;padding:12px 16px;display:flex;justify-content:space-between;align-items:center;gap:10px;font-size:15px;animation:toastIn .5s var(--spring) both;box-shadow:var(--shadow)}
 @media (min-width:760px){.toast{left:0;right:0;margin-inline:auto;width:max-content;max-width:calc(100% - 40px);bottom:28px;gap:22px}}
-.toast button{background:none;border:0;color:var(--accent);font-weight:700;font-size:14.5px;padding:2px 4px}
+.toast button{background:none;border:0;color:var(--accent);font-weight:700;font-size:15px;padding:2px 4px}
 .sync{position:fixed;left:0;right:0;top:0;height:2px;z-index:60;background:linear-gradient(90deg,transparent,var(--accent),transparent);background-size:40% 100%;background-repeat:no-repeat;animation:sweep 1.1s ease-in-out infinite;pointer-events:none}
 .ptr{display:flex;align-items:center;justify-content:center;overflow:hidden}
 .spin{width:20px;height:20px;border:2px solid var(--line);border-top-color:var(--accent);border-radius:50%;animation:rot .7s linear infinite}
@@ -836,7 +626,7 @@ textarea.input{resize:vertical;min-height:84px;line-height:1.45}
 .splash{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px;padding-bottom:40px}
 .splash .mark{font-size:48px;animation:lift .8s var(--ease) both}
 .splashLine{font-family:${SERIF};font-style:italic;color:var(--muted);margin-top:12px;animation:lift .5s var(--ease) both;min-height:22px}
-.squig path{stroke-dasharray:1;animation:draw 2.2s ease-in-out infinite}
+.squig path{stroke-dasharray:1;animation:draw 1.1s var(--ease) .3s both}
 .sk{display:flex;gap:14px;padding:16px;margin-top:9px;border:1px solid var(--line);border-radius:18px;background:var(--paper)}
 .sk i{display:block;border-radius:6px;background:linear-gradient(90deg,var(--wash) 0%,var(--line) 50%,var(--wash) 100%);background-size:200% 100%;animation:shim 1.6s linear infinite}
 .skC{width:24px;height:24px;border-radius:50%!important;flex:none}
@@ -846,20 +636,20 @@ textarea.input{resize:vertical;min-height:84px;line-height:1.45}
 /* ── interactive tour ── */
 .tour{position:fixed;inset:0;z-index:90;pointer-events:none}
 .tourBlock{position:fixed;pointer-events:auto}
-.tourHole{position:fixed;pointer-events:none;box-shadow:0 0 0 100vmax rgba(24,16,9,.62);transition:left .6s var(--ease),top .6s var(--ease),width .6s var(--ease),height .6s var(--ease),border-radius .6s var(--ease)}
+.tourHole{position:fixed;pointer-events:none;box-shadow:0 0 0 100vmax rgba(24,16,9,.62);transition:left .6s var(--ease),top .6s var(--ease),width .6s var(--ease),height .6s var(--ease),border-radius .6s var(--ease),box-shadow .8s var(--ease)}
 .tourHole::after{content:"";position:absolute;inset:-5px;border-radius:inherit;border:2px solid var(--accent);animation:tourPulse 1.9s ease-out infinite}
 .tourHole[data-none="1"]::after{display:none}
 .tourHole[data-ok="1"]::after{border-color:var(--ok);animation:tourOk .85s var(--ease) both}
 .tourCard{position:fixed;pointer-events:auto;background:var(--paper);color:var(--ink);border:1px solid var(--line);border-radius:24px;padding:20px 22px 16px;box-shadow:var(--shadow-lg);transition:left .6s var(--ease),top .6s var(--ease)}
 .tourCard.center{padding:30px 30px 22px;border-radius:30px}
 .tour.settled .tourHole,.tour.settled .tourCard{transition:none}
-.tourBody{animation:lift .5s var(--ease) both;position:relative}
+.tourBody{position:relative}
 .tourH{font-family:${SERIF};font-weight:400;font-size:22px;line-height:1.2;letter-spacing:-.02em;margin:0 28px 8px 0;text-wrap:balance}
-.tourCard.center .tourH{font-size:31px;line-height:1.12;letter-spacing:-.028em;margin-right:0}
-.tourP{margin:0;color:var(--body);font-size:14.5px;line-height:1.55}
-.tourCard.center .tourP{font-family:${SERIF};font-size:17px;line-height:1.6}
+.tourCard.center .tourH{font-size:32px;line-height:1.12;letter-spacing:-.028em;margin-right:0}
+.tourP{margin:0;color:var(--body);font-size:15px;line-height:1.55}
+.tourCard.center .tourP{font-family:${SERIF};font-size:18px;line-height:1.6}
 .tourCredit{margin:14px 0 0;font-size:13px;color:var(--faint)}
-.tourDo{display:flex;align-items:center;gap:9px;margin-top:14px;font-size:13.5px;font-weight:600;color:var(--accent)}
+.tourDo{display:flex;align-items:center;gap:9px;margin-top:14px;font-size:14px;font-weight:600;color:var(--accent)}
 .tourDo.ok{color:var(--ok);animation:pop .45s var(--spring) both}
 .tapDot{position:relative;width:10px;height:10px;border-radius:50%;background:var(--accent);flex:none}
 .tapDot::after{content:"";position:absolute;inset:-5px;border-radius:50%;border:2px solid var(--accent);animation:tourPulse 1.4s ease-out infinite}
@@ -883,8 +673,38 @@ textarea.input{resize:vertical;min-height:84px;line-height:1.45}
 .confetti{position:absolute;left:34px;top:34px;width:0;height:0;pointer-events:none}
 .confetti i{position:absolute;left:-4px;top:-6px;width:8px;height:12px;border-radius:2px;animation:scrap 1.3s cubic-bezier(.2,.7,.3,1) both}
 @keyframes tourPulse{0%{transform:scale(1);opacity:.9}75%,100%{transform:scale(1.12);opacity:0}}
+/* unboxing: lights stay up while the new piece pops out, then the spotlight and the card settle in */
+@keyframes unboxPop{0%{opacity:0;scale:.82;translate:0 26px;filter:blur(7px)}55%{opacity:1;scale:1.03;translate:0 -3px;filter:blur(0)}100%{opacity:1;scale:1;translate:0 0;filter:blur(0)}}
+${UNBOX_CSS}
+.tour[data-ph="reveal"] .tourHole{box-shadow:0 0 0 100vmax rgba(24,16,9,0)}
+.tour[data-ph="reveal"] .tourHole::after{display:none}
+.tour[data-ph="reveal"] .ico2,.tour[data-ph="reveal"] .confetti i{animation:none;opacity:0}
+.tour[data-ph="reveal"] .ico2::after{animation:none}
+.tour[data-ph="reveal"] .tourCard{opacity:0;pointer-events:none;transition:opacity .2s,left 0s,top 0s}
+.tour[data-ph="show"] .tourCard{animation:tourCardIn .6s var(--ease) both}
+@keyframes tourCardIn{from{opacity:0;scale:.94}to{opacity:1;scale:1}}
+.tour[data-ph="show"] .tourBody>:not(.ico0):not(.ico2):not(.confetti){animation:lift .65s var(--ease) both}
+.tour[data-ph="show"] .tourBody>:nth-child(1){animation-delay:.05s}
+.tour[data-ph="show"] .tourBody>:nth-child(2){animation-delay:.18s}
+.tour[data-ph="show"] .tourBody>:nth-child(3){animation-delay:.32s}
+.tour[data-ph="show"] .tourBody>:nth-child(4){animation-delay:.46s}
+.tour[data-ph="show"] .tourBody>:nth-child(5){animation-delay:.6s}
+.tour[data-ph="show"] .tourBody>:nth-child(6){animation-delay:.74s}
+.tour[data-ph="show"] .tourFoot{animation:lift .65s .55s var(--ease) both}
+.tourBurst{position:fixed;width:0;height:0;pointer-events:none;z-index:92}
+.tourBurst .scrap{left:0;top:0;margin:-6px 0 0 -4px}
+.tourProg{flex:1;height:4px;border-radius:2px;background:var(--line);overflow:hidden;margin:0 2px}
+.tourProg i{display:block;height:100%;border-radius:2px;background:var(--accent);transition:width .9s var(--ease)}
+.tourSmall{margin:18px 0 0;font-size:13px;letter-spacing:.01em;color:var(--faint)}
+.tourSmall b{font-family:${SERIF};font-weight:400;font-style:italic;color:var(--muted);font-size:14px}
+.tourSign{margin:20px 0 0;padding-top:16px;border-top:1px dashed var(--line);display:flex;flex-direction:column;gap:3px}
+.tourSign small{font-size:13px;color:var(--faint);letter-spacing:.01em}
+.tourSign b{font-family:${SERIF};font-weight:400;font-size:24px;line-height:1.15;letter-spacing:-.02em;color:var(--ink)}
+.acctSign{margin:22px 0 0;text-align:center;font-size:13px;letter-spacing:.01em;color:var(--faint)}
+.acctSign b{font-family:${SERIF};font-weight:400;font-style:italic;font-size:14px;color:var(--muted)}
+@media (prefers-reduced-motion:reduce){.hr[data-unbox] [data-rv]{animation-duration:.01ms!important;animation-delay:0s!important}.tourBurst{display:none}}
 @keyframes tourOk{from{transform:scale(1);opacity:1}to{transform:scale(1.28);opacity:0}}
-@media (max-width:519px){.tourCard.center{padding:26px 22px 18px}.tourCard.center .tourH{font-size:27px}}
+@media (max-width:519px){.tourCard.center{padding:26px 22px 18px}.tourCard.center .tourH{font-size:28px}}
 
 /* ── photo proof + groups ── */
 .pgrid{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin:0 0 12px}
@@ -894,7 +714,7 @@ textarea.input{resize:vertical;min-height:84px;line-height:1.45}
 .pthumb .x{position:absolute;top:6px;right:6px;width:28px;height:28px;border-radius:50%;border:0;background:rgba(20,20,18,.7);color:#fff;display:grid;place-items:center;padding:0;backdrop-filter:blur(4px)}
 .padd{aspect-ratio:1;border:1.5px dashed var(--faint);border-radius:16px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px;color:var(--muted);font-size:13px;cursor:pointer;background:none;text-align:center;padding:6px;transition:background .25s,border-color .2s,color .2s}
 @media (hover:hover){.padd:hover{border-color:var(--accent);color:var(--accent);background:var(--accent-soft)}}
-.pill{display:inline-flex;align-items:center;gap:5px;font-size:12.5px;font-weight:500;border-radius:999px;padding:4px 11px;border:1px solid var(--line);color:var(--muted)}
+.pill{display:inline-flex;align-items:center;gap:5px;font-size:13px;font-weight:500;border-radius:999px;padding:4px 11px;border:1px solid var(--line);color:var(--muted)}
 .pill[data-s="ok"]{color:var(--ok);border-color:var(--ok);background:var(--okbg)}
 .pill[data-s="redo"]{color:var(--danger);border-color:var(--danger);background:var(--errbg)}
 .gbar{height:5px;background:var(--line);border-radius:3px;overflow:hidden;margin:8px 0 2px}
@@ -922,11 +742,11 @@ textarea.input{resize:vertical;min-height:84px;line-height:1.45}
 
 /* hero + stats */
 .stat{background:var(--paper);border:1px solid var(--line);border-radius:20px;padding:15px 16px;box-shadow:var(--shadow-sm)}
-.stat b{display:block;font-family:${SERIF};font-weight:400;font-size:30px;line-height:1;letter-spacing:-.02em}
-.stat div span{display:block;font-size:12.5px;color:var(--muted);margin-top:6px}
+.stat b{display:block;font-family:${SERIF};font-weight:400;font-size:32px;line-height:1;letter-spacing:-.02em}
+.stat div span{display:block;font-size:13px;color:var(--muted);margin-top:6px}
 .hr.app.adminApp{--maxw:900px}
 .bgfx i{opacity:.85}
-.heroCard{position:relative;display:flex;align-items:center;justify-content:space-between;gap:20px;margin:10px 0 16px;padding:22px 24px;border-radius:28px;border:1px solid var(--line);background:linear-gradient(135deg,color-mix(in srgb,var(--accent) 10%,var(--paper)),var(--paper) 62%);box-shadow:var(--shadow);overflow:hidden;animation:lift .7s var(--ease) both}
+.heroCard{position:relative;display:flex;align-items:center;justify-content:space-between;gap:20px;margin:10px 0 16px;padding:22px 24px;border-radius:28px;border:1px solid var(--line);background:linear-gradient(135deg,color-mix(in srgb,var(--accent) 10%,var(--paper)),var(--paper) 62%);box-shadow:var(--shadow);overflow:hidden}
 .heroCard::before{content:"";position:absolute;right:-70px;top:-90px;width:260px;height:260px;border-radius:50%;background:radial-gradient(circle,var(--accent-soft),transparent 70%);pointer-events:none}
 .heroBody{position:relative;min-width:0}
 .heroBody>*{animation:lift .7s var(--ease) both}
@@ -935,10 +755,10 @@ textarea.input{resize:vertical;min-height:84px;line-height:1.45}
 .heroDate{font-size:12px;letter-spacing:.09em;text-transform:uppercase;font-weight:600;color:var(--accent)}
 .quip{font-family:${SERIF};font-style:italic;color:var(--muted);margin:2px 0 0;font-size:16px}
 .heroCard .ring{position:relative;z-index:1}
-@media (min-width:760px){.heroCard{padding:28px 34px;margin-top:16px}.quip{font-size:17px}}
+@media (min-width:760px){.heroCard{padding:28px 34px;margin-top:16px}.quip{font-size:18px}}
 .stat{position:relative;display:flex;align-items:center;gap:13px;overflow:hidden;transition:transform .35s var(--ease),box-shadow .35s var(--ease),border-color .25s}
 @media (hover:hover){.stat:hover{transform:translateY(-3px);box-shadow:var(--shadow);border-color:var(--accent-line)}}
-.stat b{font-size:30px}
+.stat b{font-size:32px}
 .statIcon{flex:none;width:40px;height:40px;border-radius:13px;display:grid;place-items:center;background:var(--accent-soft);color:var(--accent);transition:transform .4s var(--spring)}
 @media (hover:hover){.stat:hover .statIcon{transform:rotate(-8deg) scale(1.1)}}
 .stat[data-tone="bad"] .statIcon{background:var(--errbg);color:var(--danger)}
@@ -981,7 +801,7 @@ textarea.input{resize:vertical;min-height:84px;line-height:1.45}
 .sugActions{display:flex;gap:8px;margin-top:14px;flex-wrap:wrap}
 .ghostCard{display:flex;gap:14px;align-items:center;margin-top:12px;padding:18px;border:1.5px dashed var(--line);border-radius:22px;opacity:.75;animation:lift .6s var(--ease) both}
 .ghostCard i{display:block;border-radius:7px;background:var(--wash);height:12px}
-.soonIcon{position:relative;z-index:1;flex:none;width:76px;height:76px;border-radius:24px;display:grid;place-items:center;background:var(--accent-soft);color:var(--accent);animation:floaty 5s ease-in-out infinite}
+.soonIcon{position:relative;z-index:1;flex:none;width:76px;height:76px;border-radius:24px;display:grid;place-items:center;background:var(--accent-soft);color:var(--accent)}
 
 /* sign-in + welcome: one layout per screen size */
 .auth{position:relative;height:100%;overflow-y:auto;display:flex;flex-direction:column}
@@ -1001,12 +821,12 @@ textarea.input{resize:vertical;min-height:84px;line-height:1.45}
   .authArt::before,.authArt::after{content:"";position:absolute;border-radius:50%;pointer-events:none}
   .authArt::before{width:520px;height:520px;right:-180px;top:-180px;background:radial-gradient(circle,rgba(255,255,255,.2),transparent 68%)}
   .authArt::after{width:420px;height:420px;left:-140px;bottom:-160px;background:radial-gradient(circle,rgba(255,255,255,.13),transparent 70%)}
-  .artMark{font-size:30px;position:relative;z-index:1}
+  .artMark{font-size:32px;position:relative;z-index:1}
   .artMid{position:relative;z-index:1;max-width:480px}
-  .artH{font-family:${SERIF};font-weight:400;font-size:46px;line-height:1.1;letter-spacing:-.03em;margin:0 0 18px;animation:lift .9s var(--ease) both}
+  .artH{font-family:${SERIF};font-weight:400;font-size:48px;line-height:1.1;letter-spacing:-.03em;margin:0 0 18px;animation:lift .9s var(--ease) both}
   .artP{font-size:18px;line-height:1.55;color:rgba(255,255,255,.78);margin:0;animation:lift .9s var(--ease) .12s both}
   .artStack{position:relative;z-index:1;display:flex;flex-direction:column;gap:12px;max-width:400px}
-  .artCard{display:flex;align-items:center;gap:14px;padding:15px 18px;border-radius:20px;background:rgba(255,255,255,.14);border:1px solid rgba(255,255,255,.22);backdrop-filter:blur(14px);animation:floaty 7s ease-in-out infinite,lift .9s var(--ease) both}
+  .artCard{display:flex;align-items:center;gap:14px;padding:15px 18px;border-radius:20px;background:rgba(255,255,255,.14);border:1px solid rgba(255,255,255,.22);backdrop-filter:blur(14px);animation:lift .9s var(--ease) both}
   .artCard b{display:block;font-weight:550}
   .artCard small{color:rgba(255,255,255,.7);font-size:13px}
   .artCard.a1{animation-delay:0s,.25s}
@@ -1018,15 +838,14 @@ textarea.input{resize:vertical;min-height:84px;line-height:1.45}
 }
 
 /* extra motion */
-@keyframes drift{from{transform:translate(0,0) scale(1)}to{transform:translate(50px,36px) scale(1.12)}}
-@keyframes floaty{0%,100%{transform:translateY(0)}50%{transform:translateY(-7px)}}
+@keyframes drift{from{transform:translate(0,0) scale(1)}to{transform:translate(26px,18px) scale(1.05)}}
 @keyframes leave{0%{max-height:160px;opacity:1;transform:none}55%{opacity:0;transform:translateX(26px)}100%{max-height:0;margin-top:0;opacity:0;transform:translateX(26px)}}
 @keyframes fly{from{transform:rotate(var(--a)) translateX(5px) scale(1);opacity:1}to{transform:rotate(var(--a)) translateX(var(--d)) scale(.1);opacity:0}}
 @keyframes ripple{from{transform:scale(.3);opacity:.9}to{transform:scale(2.1);opacity:0}}
 
 /* ── cardboard box login ── */
 .boxStage{display:flex;flex-direction:column;align-items:center;gap:20px;padding:6px 0 4px}
-.boxBrand{font-size:34px}
+.boxBrand{font-size:32px}
 .box{position:relative;width:min(300px,78vw);height:210px;margin-top:44px;transform:rotate(calc(var(--p)*-1.4deg)) translateY(calc(var(--p)*2px));transition:transform .2s var(--ease)}
 .bFront{position:absolute;inset:0;border-radius:6px;background:repeating-linear-gradient(90deg,rgba(0,0,0,.035) 0 2px,transparent 2px 7px),linear-gradient(#D4A872,#B98650);box-shadow:inset 0 0 0 1px rgba(80,50,20,.28),0 26px 40px -20px rgba(60,40,20,.55)}
 .bInside{position:absolute;left:3px;right:3px;top:-30px;height:34px;background:linear-gradient(#4a3320,#6f4d2d);opacity:calc(var(--p)*1.4)}
@@ -1035,13 +854,13 @@ textarea.input{resize:vertical;min-height:84px;line-height:1.45}
 .bFlap.fr{right:0;transform-origin:100% 100%;border-radius:0 6px 0 0}
 .bTape{position:absolute;left:0;right:0;top:22px;height:38px;background:rgba(238,220,176,.55);border-top:1.5px dashed rgba(90,60,30,.45);border-bottom:1.5px dashed rgba(90,60,30,.45)}
 .tornFill{position:absolute;left:0;top:0;bottom:0;width:calc(var(--p)*100%);background:#4a3320;opacity:.85;box-shadow:inset 0 0 8px #000}
-.bTab{position:absolute;top:-6px;left:calc(var(--p)*(100% - 44px));width:44px;height:50px;border:0;padding:0;border-radius:6px 14px 14px 6px;background:var(--accent);color:#fff;display:grid;place-items:center;touch-action:none;cursor:grab;box-shadow:0 8px 14px -6px rgba(0,0,0,.45);animation:tabNudge 2.4s ease-in-out 1.2s infinite}
+.bTab{position:absolute;top:-6px;left:calc(var(--p)*(100% - 44px));width:44px;height:50px;border:0;padding:0;border-radius:6px 14px 14px 6px;background:var(--accent);color:#fff;display:grid;place-items:center;touch-action:none;cursor:grab;box-shadow:0 8px 14px -6px rgba(0,0,0,.45);animation:tabNudge 4.5s ease-in-out 1.6s infinite}
 .bTab:active{cursor:grabbing}
 .boxStage[data-pulled="1"] .bTab{animation:none}
 .bLabel{position:absolute;left:50%;bottom:24px;width:62%;transform:translateX(-50%) rotate(-1.5deg);background:#FBF8F0;color:#2b2824;border-radius:3px;padding:9px 12px;text-align:center;box-shadow:0 1px 0 rgba(0,0,0,.15)}
 .bLabel small{display:block;font-size:11px;color:#7a746a}
-.bLabel b{display:block;font-family:"Fraunces",Georgia,serif;font-weight:500;font-size:19px;line-height:1.3}
-.boxHint{margin:0;color:var(--muted);font-size:14.5px;transition:opacity .3s}
+.bLabel b{display:block;font-family:"Fraunces",Georgia,serif;font-weight:500;font-size:20px;line-height:1.3}
+.boxHint{margin:0;color:var(--muted);font-size:15px;transition:opacity .3s}
 .boxStage[data-pulled="1"] .boxHint{opacity:0}
 .boxStage[data-phase="opening"]{animation:boxAway .35s ease-in .9s forwards}
 .boxStage[data-phase="opening"] .box{animation:boxJolt .5s var(--ease)}
@@ -1106,7 +925,7 @@ textarea.input{resize:vertical;min-height:84px;line-height:1.45}
 /* ── v2 polish: calmer notes, clearer due dates, tighter phone hero ── */
 .note{background:var(--paper);border:1px solid var(--line);border-left:3px solid var(--accent);box-shadow:var(--shadow-sm)}
 .note p span{color:var(--accent)}
-.due{display:inline-block;padding:2px 10px;border-radius:999px;font-size:12.5px;font-weight:550;color:var(--muted);background:var(--wash);transition:background .3s var(--ease),color .3s}
+.due{display:inline-block;padding:2px 10px;border-radius:999px;font-size:13px;font-weight:550;color:var(--muted);background:var(--wash);transition:background .3s var(--ease),color .3s}
 .due[data-tone="late"]{background:var(--errbg);color:var(--danger)}
 .due[data-tone="today"]{background:var(--accent-soft);color:var(--accent)}
 .due[data-tone="done"]{background:none;color:var(--faint);padding-right:0}
@@ -1118,7 +937,7 @@ textarea.input{resize:vertical;min-height:84px;line-height:1.45}
 @media (max-width:519px){
   .heroCard{padding:18px 18px 18px 20px;gap:10px;border-radius:26px}
   .heroCard .h1{font-size:28px;line-height:1.1}
-  .heroDate{font-size:11.5px}
+  .heroDate{font-size:12px}
   .stats{gap:8px}
 }
 /* ── v3: one physical language ──
@@ -1127,7 +946,7 @@ textarea.input{resize:vertical;min-height:84px;line-height:1.45}
    Motion you didn't trigger happens once, on the greeting. The big moment is finishing a task. */
 .hr{--shadow-sm:0 1px 2px rgba(60,45,20,.05);--shadow:0 14px 32px -18px rgba(60,45,20,.24),0 1px 3px rgba(60,45,20,.05)}
 .h1{background:none;-webkit-background-clip:border-box;background-clip:border-box;-webkit-text-fill-color:currentColor;color:var(--ink)}
-.heroDate,.card h4,.col h4{text-transform:none;letter-spacing:0;font-size:13.5px;font-weight:550}
+.heroDate,.card h4,.col h4{text-transform:none;letter-spacing:0;font-size:14px;font-weight:550}
 .card h4,.col h4{color:var(--muted)}
 .stat b,.ring .lbl b,.due,.rowRight,.kbd,.group h3 small,.fcount{font-variant-numeric:tabular-nums}
 .heroCard{background:linear-gradient(150deg,color-mix(in srgb,var(--accent) 8%,var(--paper)),var(--paper) 68%)}
@@ -1206,9 +1025,9 @@ textarea.input{resize:vertical;min-height:84px;line-height:1.45}
    (Replaces the flat v4 look.) */
 .hr{--bg:#F5F1E8;--paper:#FFFDF8;--ink:#201C17;--muted:#716958;--faint:#A59C8A;--line:#E7DFCE;--wash:#EFE8D9;--body:#3C362D;--glass:rgba(245,241,232,.84);--okbg:#EDF4EC;--errbg:#FBEEE8;--shadow-sm:0 1px 2px rgba(70,50,20,.05);--shadow:0 20px 44px -24px rgba(70,50,20,.34),0 2px 6px rgba(70,50,20,.05);--shadow-lg:0 40px 90px -30px rgba(50,35,10,.5)}
 .hr[data-theme="dark"]{--bg:#1A1714;--paper:#23201C;--ink:#F3EDE2;--muted:#ABA396;--faint:#7B7467;--line:#35302A;--wash:#2B2723;--body:#DDD6C9;--glass:rgba(26,23,20,.84);--okbg:#1E2A21;--errbg:#33211C;--shadow-sm:0 1px 2px rgba(0,0,0,.4);--shadow:0 20px 44px -24px rgba(0,0,0,.8),0 2px 6px rgba(0,0,0,.3);--shadow-lg:0 40px 90px -30px rgba(0,0,0,.9)}
-.h1{font-size:34px;font-weight:400;letter-spacing:-.03em}
+.h1{font-size:32px;font-weight:400;letter-spacing:-.03em}
 .heroCard{padding:20px 24px;margin:6px 0 14px;border-radius:26px}
-.heroCard .h1{font-size:30px;margin:0 0 4px}
+.heroCard .h1{font-size:32px;margin:0 0 4px}
 .heroCard .sub{margin:0}
 .mark{font-weight:500;letter-spacing:-.03em}
 .btn.accent{background:linear-gradient(180deg,color-mix(in srgb,var(--accent) 90%,#fff),var(--accent))}
@@ -1225,21 +1044,21 @@ textarea.input{resize:vertical;min-height:84px;line-height:1.45}
 .bp .bpLink{background:none;border:0;padding:8px 4px;font-size:14px;color:var(--muted)}
 .bpMain{width:100%;max-width:660px;flex:1;display:flex;flex-direction:column;justify-content:center;padding:18px 0}
 .bpH{font-family:${SERIF};font-weight:400;font-size:clamp(32px,6vw,46px);letter-spacing:-.03em;line-height:1.06;margin:0 0 10px;text-align:center}
-.bpSub{text-align:center;color:var(--muted);font-family:${SERIF};font-size:17px;margin:0 0 28px}
+.bpSub{text-align:center;color:var(--muted);font-family:${SERIF};font-size:18px;margin:0 0 28px}
 .bpTicket{position:relative;display:flex;filter:drop-shadow(0 26px 28px rgba(70,45,15,.2));transform:rotate(-.5deg)}
 .bpBody{position:relative;flex:1;min-width:0;background:linear-gradient(180deg,color-mix(in srgb,var(--accent) 5%,var(--paper)),var(--paper) 45%);border:1px solid var(--line);border-right:0;border-radius:20px 0 0 20px;padding:22px 22px 22px}
 .bpStub{position:relative;width:96px;flex:none;background:linear-gradient(180deg,color-mix(in srgb,var(--accent) 5%,var(--paper)),var(--paper) 45%);border:1px solid var(--line);border-left:2px dashed var(--line);border-radius:0 20px 20px 0;padding:18px 12px;display:flex;flex-direction:column;justify-content:space-between;align-items:center;gap:12px;transform-origin:0 100%}
 .bpStub::before,.bpStub::after{content:"";position:absolute;left:-11px;width:20px;height:20px;border-radius:50%;background:var(--bg)}
 .bpStub::before{top:-10px}.bpStub::after{bottom:-10px}
 .bpBars{display:block;width:100%;height:64px;background:repeating-linear-gradient(90deg,var(--ink) 0 2px,transparent 2px 4px,var(--ink) 4px 5px,transparent 5px 8px);opacity:.85}
-.bpStub small{font-size:10.5px;letter-spacing:.16em;text-transform:uppercase;color:var(--muted)}
+.bpStub small{font-size:11px;letter-spacing:.16em;text-transform:uppercase;color:var(--muted)}
 .bpTicket[data-phase="stamped"] .bpStub{cursor:pointer}
 .bpHead{display:flex;justify-content:space-between;gap:10px;font-size:11px;letter-spacing:.18em;text-transform:uppercase;color:var(--muted);padding-bottom:12px;border-bottom:1px solid var(--line);margin-bottom:16px}
 .bpLab{display:block;font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:var(--faint);margin-bottom:2px}
-.bp .bpName{width:100%;border:0;border-bottom:1.5px solid var(--line);background:none;border-radius:0;font-family:${SERIF};font-size:34px;letter-spacing:-.02em;padding:2px 0 6px;color:var(--ink);transition:border-color .2s}
+.bp .bpName{width:100%;border:0;border-bottom:1.5px solid var(--line);background:none;border-radius:0;font-family:${SERIF};font-size:32px;letter-spacing:-.02em;padding:2px 0 6px;color:var(--ink);transition:border-color .2s}
 .bp .bpName:focus{outline:0;border-color:var(--accent)}
 .bp .bpName::placeholder{color:var(--faint)}
-.bpHint{font-size:12.5px;color:var(--faint);margin:6px 0 0}
+.bpHint{font-size:13px;color:var(--faint);margin:6px 0 0}
 .bpHint.bad{color:var(--danger)}
 .bpClass{margin-top:16px}
 .bpClass .field{margin-bottom:0}
@@ -1247,7 +1066,7 @@ textarea.input{resize:vertical;min-height:84px;line-height:1.45}
 .bpGate{font-family:${SERIF};font-size:28px;letter-spacing:-.02em}
 .bpGrid{display:flex;gap:10px 24px;flex-wrap:wrap;margin-top:18px;padding:14px 112px 0 0;border-top:1px dashed var(--line);min-height:76px}
 .bpGrid small{display:block;font-size:11px;letter-spacing:.1em;text-transform:uppercase;color:var(--faint);margin-bottom:2px}
-.bpGrid b{font-weight:600;font-size:14.5px}
+.bpGrid b{font-weight:600;font-size:15px}
 .bpGhost,.bpStamp{position:absolute;right:16px;bottom:14px;width:104px;height:104px;border-radius:50%}
 .bpGhost{border:2px dashed var(--line)}
 .bpStamp{display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;color:var(--accent);border:2.5px solid var(--accent);box-shadow:inset 0 0 0 4px var(--paper),inset 0 0 0 5.5px var(--accent);background:color-mix(in srgb,var(--accent) 7%,transparent);transform:rotate(-12deg);animation:bpStamp .5s var(--spring) both}
@@ -1280,10 +1099,6 @@ textarea.input{resize:vertical;min-height:84px;line-height:1.45}
 .trail{position:absolute;left:0;top:calc(46% + 2px);height:3px;width:calc(var(--x) * 100%);border-radius:3px;background:repeating-linear-gradient(90deg,var(--accent) 0 12px,transparent 12px 22px);-webkit-mask-image:linear-gradient(90deg,transparent,#000 70%);mask-image:linear-gradient(90deg,transparent,#000 70%);opacity:var(--tf)}
 .jet{position:absolute;left:0;top:46%;width:clamp(120px,22vw,190px);height:auto;transform:translate(calc(var(--x) * 100vw - 62%),-50%) rotate(-3deg);filter:drop-shadow(0 14px 14px rgba(40,25,10,.25))}
 
-/* ── tour invite ── */
-.invite{position:absolute;left:0;right:0;margin:0 auto;width:max-content;max-width:calc(100% - 28px);bottom:26px;z-index:30;display:flex;align-items:center;gap:14px;padding:12px 12px 12px 18px;border-radius:18px;background:var(--paper);border:1px solid var(--line);box-shadow:var(--shadow);animation:lift .6s var(--spring) both}
-.invite b{display:block;font-size:14.5px}
-.invite small{display:block;color:var(--muted);font-size:13px}
 
 /* ── the cabin: seat map of your class ── */
 .railCabin{display:none}
@@ -1295,27 +1110,27 @@ textarea.input{resize:vertical;min-height:84px;line-height:1.45}
 .cabin[data-in="sheet"] .fuselage{max-height:46vh}
 .cabinHead{display:flex;flex-direction:column;gap:8px}
 .cabinTitle{display:flex;align-items:center;justify-content:space-between}
-.cabinTitle b{font-family:${SERIF};font-weight:400;font-size:19px;letter-spacing:-.01em}
-.cabinLive{font-size:10.5px;letter-spacing:.1em;text-transform:uppercase;color:var(--faint);display:inline-flex;align-items:center;gap:6px}
+.cabinTitle b{font-family:${SERIF};font-weight:400;font-size:20px;letter-spacing:-.01em}
+.cabinLive{font-size:11px;letter-spacing:.1em;text-transform:uppercase;color:var(--faint);display:inline-flex;align-items:center;gap:6px}
 .cabinLive::before{content:"";width:7px;height:7px;border-radius:50%;background:var(--faint)}
 .cabinLive[data-live="1"]{color:var(--ok)}
 .cabinLive[data-live="1"]::before{background:var(--ok);animation:livePulse 2.2s infinite}
 @keyframes livePulse{0%{box-shadow:0 0 0 0 color-mix(in srgb,var(--ok) 55%,transparent)}70%,100%{box-shadow:0 0 0 7px transparent}}
 .cabinTools{display:flex;gap:8px;align-items:center;justify-content:space-between}
 .seg2{display:inline-flex;padding:2px;border-radius:999px;background:var(--wash)}
-.seg2 button{border:0;background:none;padding:4px 10px;border-radius:999px;font-size:11.5px;font-weight:600;color:var(--muted);transition:background .2s,color .2s}
+.seg2 button{border:0;background:none;padding:4px 10px;border-radius:999px;font-size:12px;font-weight:600;color:var(--muted);transition:background .2s,color .2s}
 .seg2 button[aria-pressed="true"]{background:var(--paper);color:var(--ink);box-shadow:var(--shadow-sm)}
 .cabinFilter{position:relative;min-width:0}
 .filterPill{display:inline-flex;align-items:center;gap:6px;max-width:132px;padding:5px 11px;border-radius:999px;border:1px solid var(--line);background:var(--paper);font-size:12px;font-weight:600;color:var(--muted);transition:border-color .2s,color .2s,background .2s}
 .filterPill span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .filterPill[data-on="1"]{border-color:var(--accent);color:var(--accent);background:var(--accent-soft)}
 .filterMenu{position:absolute;right:0;top:calc(100% + 6px);z-index:20;width:214px;padding:6px;border-radius:14px;background:var(--paper);border:1px solid var(--line);box-shadow:var(--shadow);animation:lift .25s var(--ease) both}
-.filterMenu button{display:flex;width:100%;align-items:center;gap:0;border:0;background:none;padding:8px 10px;border-radius:9px;font-size:13.5px;text-align:left;transition:background .15s}
+.filterMenu button{display:flex;width:100%;align-items:center;gap:0;border:0;background:none;padding:8px 10px;border-radius:9px;font-size:14px;text-align:left;transition:background .15s}
 .filterMenu button small{margin-left:auto;color:var(--faint)}
 .filterMenu button[aria-checked="true"]{background:var(--wash);font-weight:600}
 @media (hover:hover){.filterMenu button:hover{background:var(--wash)}}
 .filterMenu p{margin:6px 10px;font-size:12px;color:var(--muted);line-height:1.4}
-.cabinLegend{display:flex;justify-content:space-between;gap:6px;font-size:10.5px;color:var(--muted)}
+.cabinLegend{display:flex;justify-content:space-between;gap:6px;font-size:11px;color:var(--muted)}
 .cabinLegend span{display:inline-flex;align-items:center;gap:4px}
 .cabinLegend i{width:10px;height:4px;border-radius:2px;background:var(--faint)}
 .cabinLegend [data-st="complete"] i,.cChip[data-st="complete"] i{background:var(--ok)}
@@ -1356,12 +1171,12 @@ textarea.input{resize:vertical;min-height:84px;line-height:1.45}
 .cabinWho b{font-family:${SERIF};font-size:18px;font-weight:500;overflow:hidden;text-overflow:ellipsis}
 .cabinWho small{color:var(--faint);font-size:12px}
 .cabinChips{display:flex;flex-wrap:wrap;gap:6px;margin:8px 0}
-.cChip{display:inline-flex;align-items:center;gap:6px;padding:3px 9px;border-radius:999px;font-size:11.5px;font-weight:600;background:var(--wash);color:var(--muted)}
+.cChip{display:inline-flex;align-items:center;gap:6px;padding:3px 9px;border-radius:999px;font-size:12px;font-weight:600;background:var(--wash);color:var(--muted)}
 .cChip i{width:7px;height:7px;border-radius:50%;background:var(--faint)}
 .cChip[data-on="1"]{color:var(--ok);background:var(--okbg)}
 .cChip[data-on="1"] i{background:var(--ok)}
 .cabinFoot{display:flex;align-items:center;justify-content:space-between;gap:10px;min-height:30px}
-.cabinFoot small{color:var(--muted);font-size:12.5px}
+.cabinFoot small{color:var(--muted);font-size:13px}
 .cabinHint{font-size:12px;line-height:1.45;color:var(--muted);margin:0}
 .cabinBtn{position:relative}
 .cabinBtn[data-ping="1"]::after{content:"";position:absolute;top:1px;right:1px;width:10px;height:10px;border-radius:50%;background:var(--accent);border:2px solid var(--paper)}
@@ -1373,18 +1188,18 @@ textarea.input{resize:vertical;min-height:84px;line-height:1.45}
 .newSubj .swatches{margin:0}
 .dot.big{width:14px;height:14px;margin-right:12px}
 .subjRow{border-bottom:1px solid var(--line)}
-.subjHead{display:flex;align-items:center;width:100%;border:0;background:none;padding:14px 2px;text-align:left;font-size:15.5px}
+.subjHead{display:flex;align-items:center;width:100%;border:0;background:none;padding:14px 2px;text-align:left;font-size:16px}
 .subjHead b{font-weight:500;flex:1}
 .subjHead svg{color:var(--faint)}
 .doneHero{margin:6px 0 18px;padding:18px 20px;border-radius:20px;border:1px solid var(--line);background:linear-gradient(135deg,color-mix(in srgb,var(--ok) 9%,var(--paper)),var(--paper) 70%)}
-.doneHero b{font-family:${SERIF};font-weight:400;font-size:38px;letter-spacing:-.03em}
+.doneHero b{font-family:${SERIF};font-weight:400;font-size:40px;letter-spacing:-.03em}
 .doneHero span{color:var(--muted);font-size:15px}
 .doneHero .gbar{margin:10px 0 8px}
 .doneHero small{color:var(--muted);font-size:13px}
 .classChip i{font-style:normal;margin-left:8px;padding-left:8px;border-left:1px solid var(--line);color:var(--accent);font-weight:600}
 .cabin[data-in="sheet"] .cabinTitle b{display:none}
 .cabin[data-in="sheet"] .cabinTitle{justify-content:flex-end}
-.seatBack b{font-size:10.5px;letter-spacing:-.01em}
+.seatBack b{font-size:11px;letter-spacing:-.01em}
 
 /* ── class plane: isolated and calmer (nothing from the page can show through or pile up inside it) ── */
 .rail{background:var(--paper)}
@@ -1412,11 +1227,11 @@ textarea.input{resize:vertical;min-height:84px;line-height:1.45}
 
 /* ── study hub ── */
 .study{display:block}
-.studyStats{display:flex;gap:18px;flex-wrap:wrap;margin:0 0 6px;font-size:13.5px;color:var(--muted)}
+.studyStats{display:flex;gap:18px;flex-wrap:wrap;margin:0 0 6px;font-size:14px;color:var(--muted)}
 .studyStats b{color:var(--accent);font-weight:600}
-.stepLabel{display:flex;align-items:center;gap:10px;margin:22px 0 12px;font-family:${SERIF};font-weight:400;font-size:21px;letter-spacing:-.01em}
+.stepLabel{display:flex;align-items:center;gap:10px;margin:22px 0 12px;font-family:${SERIF};font-weight:400;font-size:22px;letter-spacing:-.01em}
 .stepLabel i{font-style:normal;display:grid;place-items:center;width:26px;height:26px;border-radius:50%;background:var(--accent-soft);color:var(--accent);font-family:${SANS};font-size:13px;font-weight:600}
-.scopeLine{margin:14px 0 0;padding:11px 14px;border-radius:14px;background:var(--wash);color:var(--muted);font-size:13.5px;line-height:1.5}
+.scopeLine{margin:14px 0 0;padding:11px 14px;border-radius:14px;background:var(--wash);color:var(--muted);font-size:14px;line-height:1.5}
 .scopeLine b{color:var(--ink);font-weight:600}
 .goal{margin-bottom:18px}
 .goalHead{display:flex;align-items:baseline;gap:10px;margin:0 0 8px;flex-wrap:wrap}
@@ -1425,7 +1240,7 @@ textarea.input{resize:vertical;min-height:84px;line-height:1.45}
 .techGrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:10px}
 .tech{display:flex;flex-direction:column;align-items:flex-start;gap:5px;text-align:left;padding:15px 16px;border-radius:18px;border:1px solid var(--line);background:var(--paper);box-shadow:var(--shadow-sm);transition:transform .25s var(--spring),border-color .2s,box-shadow .2s}
 .tech b{font-family:${SERIF};font-weight:500;font-size:18px;letter-spacing:-.01em}
-.tech span{font-size:13.5px;line-height:1.45;color:var(--muted)}
+.tech span{font-size:14px;line-height:1.45;color:var(--muted)}
 .tech em{font-style:normal;margin-top:auto;padding-top:6px;font-size:12px;color:var(--accent);font-weight:600}
 @media (hover:hover){.tech:hover:not(:disabled){transform:translateY(-2px);border-color:var(--accent-line);box-shadow:var(--shadow)}}
 .tech:active:not(:disabled){transform:scale(.98)}
@@ -1440,7 +1255,7 @@ textarea.input{resize:vertical;min-height:84px;line-height:1.45}
 .runDone .mcIcon{margin:0 auto 14px}
 .fc{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;width:100%;min-height:250px;padding:26px 22px;border-radius:26px;border:1px solid var(--line);background:linear-gradient(180deg,var(--paper),color-mix(in srgb,var(--wash) 60%,var(--paper)));box-shadow:var(--shadow);text-align:center;transition:transform .35s var(--spring),border-color .2s}
 .fc[data-flip="1"]{border-color:var(--accent-line);background:linear-gradient(180deg,color-mix(in srgb,var(--accent) 6%,var(--paper)),var(--paper))}
-.fc small{font-size:11.5px;letter-spacing:.14em;text-transform:uppercase;color:var(--faint)}
+.fc small{font-size:12px;letter-spacing:.14em;text-transform:uppercase;color:var(--faint)}
 .fc span{font-size:clamp(22px,4.5vw,30px);line-height:1.25;letter-spacing:-.01em}
 .fc[data-flip="1"] span{font-size:clamp(18px,3.6vw,23px);line-height:1.45}
 .fc em{font-style:normal;font-size:13px;color:var(--faint)}
@@ -1448,27 +1263,27 @@ textarea.input{resize:vertical;min-height:84px;line-height:1.45}
 .rateRow{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-top:14px}
 .rateRow .btn{display:flex;flex-direction:column;align-items:center;gap:1px;padding:12px 8px}
 .rateRow small{font-size:11px;opacity:.7;font-weight:400}
-.clozeText{font-size:21px;line-height:1.45;margin:0 0 16px;letter-spacing:-.01em}
-.fbOk,.fbBad{margin:12px 0;padding:10px 14px;border-radius:12px;font-size:14.5px;line-height:1.5}
+.clozeText{font-size:22px;line-height:1.45;margin:0 0 16px;letter-spacing:-.01em}
+.fbOk,.fbBad{margin:12px 0;padding:10px 14px;border-radius:12px;font-size:15px;line-height:1.5}
 .fbOk{background:var(--okbg);color:var(--ok)}
 .fbBad{background:var(--errbg);color:var(--danger)}
-.fbBox{margin-top:14px;padding:14px 16px;border-radius:16px;line-height:1.5;font-size:14.5px}
+.fbBox{margin-top:14px;padding:14px 16px;border-radius:16px;line-height:1.5;font-size:15px}
 .fbBox[data-v="ok"]{background:var(--okbg)}
 .fbBox[data-v="no"]{background:var(--wash)}
-.fbBox b{font-family:${SERIF};font-size:19px;font-weight:500}
+.fbBox b{font-family:${SERIF};font-size:20px;font-weight:500}
 .fbBox p{margin:6px 0 0}
 .matchGrid{display:grid;grid-template-columns:1fr 1.5fr;gap:12px;align-items:start}
 .matchGrid>div{display:flex;flex-direction:column;gap:9px}
 .mBtn{padding:13px 14px;border-radius:14px;border:1.5px solid var(--line);background:var(--paper);text-align:left;font-size:15px;font-weight:500;transition:transform .2s var(--spring),border-color .2s,background .2s,opacity .3s}
-.mBtn.small{font-weight:400;font-size:13.5px;line-height:1.4}
+.mBtn.small{font-weight:400;font-size:14px;line-height:1.4}
 .mBtn[data-on="1"]{border-color:var(--accent);background:var(--accent-soft)}
 .mBtn[data-done="1"]{opacity:.35;border-color:var(--ok);background:var(--okbg)}
 .mBtn[data-bad="1"]{animation:shake .4s;border-color:var(--danger)}
 @keyframes shake{20%,60%{transform:translateX(-5px)}40%,80%{transform:translateX(5px)}}
 .trickRow{padding:13px 0;border-bottom:1px solid var(--line)}
-.trickRow b{display:block;font-weight:600;font-size:14.5px}
+.trickRow b{display:block;font-weight:600;font-size:15px}
 .trickRow span{display:block;color:var(--muted);font-size:14px;line-height:1.5;margin-top:2px}
-.trick{margin:8px 0 0;padding:9px 12px;border-radius:12px;background:var(--accent-soft);font-family:${SERIF};font-size:15.5px;line-height:1.45;color:var(--ink)}
+.trick{margin:8px 0 0;padding:9px 12px;border-radius:12px;background:var(--accent-soft);font-family:${SERIF};font-size:16px;line-height:1.45;color:var(--ink)}
 .choices{display:flex;flex-direction:column;gap:9px}
 .choice{padding:13px 15px;border-radius:14px;border:1.5px solid var(--line);background:var(--paper);text-align:left;font-size:15px;line-height:1.4;transition:border-color .2s,background .2s,transform .2s var(--spring)}
 .choice:active:not(:disabled){transform:scale(.99)}
@@ -1485,21 +1300,20 @@ textarea.input{resize:vertical;min-height:84px;line-height:1.45}
 
 @media (min-width:1180px) and (max-height:860px){.cabinLegend{display:none}.cabinCard{padding:9px 12px}.cabinChips{margin:6px 0}.cabinFoot{min-height:0}}
 
-.focusPill{display:inline-flex;align-items:center;gap:8px;margin:0 0 12px;padding:6px 8px 6px 14px;border-radius:999px;background:var(--accent-soft);color:var(--accent);font-size:13.5px}
+.focusPill{display:inline-flex;align-items:center;gap:8px;margin:0 0 12px;padding:6px 8px 6px 14px;border-radius:999px;background:var(--accent-soft);color:var(--accent);font-size:14px}
 .focusPill b{font-weight:600}
 .focusPill button{display:grid;place-items:center;width:22px;height:22px;border:0;border-radius:50%;background:color-mix(in srgb,var(--accent) 16%,transparent)}
 .tech{position:relative}
 .tech[data-rec="1"]{border-color:var(--accent-line);background:linear-gradient(180deg,color-mix(in srgb,var(--accent) 5%,var(--paper)),var(--paper))}
-.recTag{display:block;margin:-2px 0 2px;font-style:normal;font-size:10.5px;letter-spacing:.06em;text-transform:uppercase;font-weight:600;color:var(--accent)}
-@media (max-width:759px){.invite{bottom:calc(92px + env(safe-area-inset-bottom))}}
+.recTag{display:block;margin:-2px 0 2px;font-style:normal;font-size:11px;letter-spacing:.06em;text-transform:uppercase;font-weight:600;color:var(--accent)}
 @media (max-width:520px){.bpAct{position:sticky;bottom:calc(10px + env(safe-area-inset-bottom));z-index:2}.bpSub{margin-bottom:18px}.bp{padding-top:16px}.bpMain{padding:10px 0}}
 
 /* ── temporary chat ── */
 .dm{display:flex;flex-direction:column;height:min(60vh,520px)}
 .dmHead{display:flex;align-items:center;gap:12px;padding:2px 0 14px;border-bottom:1px solid var(--line)}
 .dmAvatar{width:40px;height:40px;border-radius:50%;display:grid;place-items:center;background:var(--accent-soft);color:var(--accent);font-family:${SERIF};font-size:18px}
-.dmHead b{display:block;font-family:${SERIF};font-weight:500;font-size:19px}
-.dmHead small{display:block;font-size:12.5px;color:var(--muted)}
+.dmHead b{display:block;font-family:${SERIF};font-weight:500;font-size:20px}
+.dmHead small{display:block;font-size:13px;color:var(--muted)}
 .dmHead small[data-on="1"]{color:var(--ok)}
 .dmMsgs{flex:1;min-height:0;overflow-y:auto;padding:12px 2px;display:flex;flex-direction:column;gap:8px}
 .dmMsg{max-width:82%;padding:9px 14px;border-radius:18px 18px 18px 6px;background:var(--wash);white-space:pre-wrap;word-break:break-word;line-height:1.45;animation:lift .3s var(--ease) both}
@@ -1523,6 +1337,181 @@ textarea.input{resize:vertical;min-height:84px;line-height:1.45}
 .quickRow{display:flex;gap:2px;flex-wrap:wrap;margin:-8px 0 20px -10px}
 .quickRow .btn{background:none;border-color:transparent;color:var(--muted);padding-left:10px;padding-right:12px}
 .quickRow .btn:hover{color:var(--ink);background:var(--wash)}
+
+/* ── v12: density. The task list leads; controls recede; rows say less ── */
+/* filter rows (not form pickers) become quiet text pills: the selected one is a soft fill, not an outlined box */
+.chips:not([style*="flex-wrap"]){gap:4px;padding-top:10px;padding-bottom:2px}
+.chips:not([style*="flex-wrap"]) .chip{border-color:transparent;background:none;padding:6px 12px}
+.chips:not([style*="flex-wrap"]) .chip[aria-pressed="true"]{background:var(--wash);color:var(--ink);box-shadow:none;transform:none}
+@media (hover:hover){.chips:not([style*="flex-wrap"]) .chip:hover{background:var(--wash);color:var(--ink)}}
+.filterBtn{background:none}
+/* quick actions stay on one line on phones instead of wrapping into a second row */
+.quickRow{flex-wrap:nowrap;overflow-x:auto;scrollbar-width:none}
+.quickRow::-webkit-scrollbar{display:none}
+.quickRow .btn{flex:none;white-space:nowrap}
+/* rows: only High priority earns a word; Medium and Low stay quiet (still shown in the task sheet) */
+.pri[data-p="Medium"],.pri[data-p="Low"]{display:none}
+.rowMeta{margin-top:3px;gap:2px 10px}
+/* stacked filter controls get real spacing instead of 4px slivers */
+.fpanel .fin{display:grid;gap:10px;padding:14px 0 6px}
+
+/* ── v13: Claude-Parchment tokens. Parchment base, white cards on a 1px line, one warm terracotta.
+   Small text on a terracotta fill, and accent-coloured text, use a deeper tone so they stay readable (AA). ── */
+.hr{--bg:#FAF9F5;--paper:#FFFFFF;--ink:#141413;--muted:#666560;--faint:#767269;--line:#E8E6DC;--wash:#F0EEE6;--body:#3A3935;--glass:rgba(250,249,245,.86);--shadow-sm:0 1px 2px rgba(20,20,19,.04);--shadow:0 14px 32px -22px rgba(20,20,19,.2),0 1px 3px rgba(20,20,19,.04);--shadow-lg:0 36px 80px -34px rgba(20,20,19,.28);--accent-strong:#B9553A;--accent-ink:#A8482A;--ok:#3F7A55;--accent-on:#FFFFFF;--danger-on:#FFFFFF}
+.hr[data-theme="dark"]{--accent-strong:var(--accent);--accent-ink:var(--accent)}
+.btn.accent,.badge,.filterBtn .fcount{background:var(--accent-strong)}
+.streak,.pri[data-p="High"]{color:var(--accent-ink)}
+.hr :focus-visible{outline-offset:3px}
+
+/* ── v14: work zone. While a study run is open, only the run is on screen ── */
+.hr[data-focus="1"] .rail,.hr[data-focus="1"] .side,.hr[data-focus="1"] .tabs,.hr[data-focus="1"] .fab,.hr[data-focus="1"] .head{display:none}
+.hr.app[data-focus="1"]{grid-template-columns:minmax(0,1fr)}
+.hr[data-focus="1"] .scroll{padding-top:max(20px,env(safe-area-inset-top));padding-bottom:48px}
+
+/* ── v15: study hub + sheets. Flat cards, plain-case labels, small text that passes AA, a gentler wrong answer ── */
+.stepLabel i{background:var(--wash);color:var(--muted)}
+.studyStats b{color:var(--ink)}
+.goalHead b{font-size:14px;letter-spacing:0;text-transform:none;color:var(--ink)}
+.goalHead span{color:var(--muted)}
+.tech{box-shadow:none}
+@media (hover:hover){.tech:hover:not(:disabled){transform:translateY(-1px);box-shadow:none}}
+.tech em{color:var(--muted)}
+.tech[data-rec="1"]{background:var(--paper)}
+.recTag{font-size:12px;letter-spacing:0;text-transform:none;color:var(--accent-ink)}
+.focusPill{color:var(--accent-ink)}
+.fc{background:var(--paper);box-shadow:none}
+.fc[data-flip="1"]{background:var(--paper)}
+.fc small{font-size:12px;letter-spacing:0;text-transform:none;color:var(--muted)}
+.fc em{color:var(--muted)}
+.planDay[data-today="1"]{background:var(--paper)}
+.fbOk{color:color-mix(in srgb,var(--ok) 70%,var(--ink))}
+.mBtn[data-bad="1"]{animation:none;background:var(--errbg)}
+.run{margin-inline:auto}
+.scrim{background:rgba(20,20,19,.32);backdrop-filter:none;-webkit-backdrop-filter:none}
+
+/* ── v16: dark-mode parity and AA text. Measured contrast: white on the dark accent was 2.6:1, "faint" text 3.4-3.9:1 in both themes.
+   Dark theme gets dark labels on its light accent; every text-bearing accent fill uses --accent-on / --accent-strong. ── */
+.hr[data-theme="dark"]{--faint:#968E80;--accent-on:#1A1714;--danger-on:#1A1714}
+.badge,.btn.accent,.filterBtn .fcount,.msg.me,.send,.fab,.bTab,.day[data-today="1"] .num,.bp .bpGo[data-pulse="1"],.dmMsg[data-me="1"]{color:var(--accent-on)}
+.msg.me,.dmMsg[data-me="1"],.day[data-today="1"] .num,.bp .bpGo[data-pulse="1"]{background:var(--accent-strong)}
+.btn.danger{color:var(--danger-on)}
+
+/* ── ported from v13: plane cabin, boarding-pass route, keyboard sheet, skip link, draft note, accessibility ── */
+/* ── v12 plane: an aircraft in plan view (skin + cabin wall + windows, swept wings, real seats) ── */
+.plane{position:relative;flex:1;min-height:130px;display:flex;margin:0 -8px;padding:0 8px}
+.cabin[data-in="sheet"] .plane{flex:none}
+.plane .fuselage{flex:1;min-width:0;z-index:1;padding:0 11px 16px;background:var(--paper);border:1.5px solid color-mix(in srgb,var(--ink) 18%,var(--line));box-shadow:inset 0 0 0 6px var(--wash),inset 0 0 0 7px var(--line)}
+.wing{position:absolute;top:30%;width:26px;height:92px;z-index:0;background:color-mix(in srgb,var(--ink) 10%,var(--bg))}
+.wing.l{left:0;clip-path:polygon(100% 0,4% 74%,4% 92%,100% 50%)}
+.wing.r{right:0;clip-path:polygon(0 0,96% 74%,96% 92%,0 50%)}
+.nose{height:48px;padding-bottom:10px}
+.nose i{width:48px;height:15px;border:0;border-radius:0;clip-path:polygon(9% 0,91% 0,100% 100%,0 100%);background:linear-gradient(180deg,color-mix(in srgb,var(--ink) 30%,var(--paper)),color-mix(in srgb,var(--ink) 16%,var(--paper)))}
+.tail{width:34%;height:22px;margin-top:10px;border-radius:0 0 24px 24px;background:var(--wash);box-shadow:inset 0 0 0 1px var(--line)}
+.letters{font-family:${SERIF};font-style:italic;font-weight:400;font-size:12px;letter-spacing:0;opacity:.9}
+.seatRow{position:relative;gap:7px;margin-bottom:9px}
+.seatRow::before,.seatRow::after{content:"";position:absolute;top:8px;width:4px;height:15px;border-radius:2px;background:color-mix(in srgb,var(--ink) 20%,var(--paper))}
+.seatRow::before{left:-9px}
+.seatRow::after{right:-9px}
+.aisle{font-family:${SERIF};font-size:11px;font-feature-settings:"tnum";color:var(--faint);height:34px}
+.seatBack{position:relative;overflow:visible;height:34px;padding:7px 3px 0;border-radius:12px 12px 7px 7px;border:1px solid color-mix(in srgb,var(--ink) 15%,var(--line));background:linear-gradient(180deg,color-mix(in srgb,var(--ink) 8%,var(--paper)) 0 8px,var(--paper) 8px)}
+.seatBack::before,.seatBack::after{content:"";position:absolute;bottom:3px;width:2px;height:52%;border-radius:2px;background:color-mix(in srgb,var(--ink) 16%,var(--paper))}
+.seatBack::before{left:-4px}
+.seatBack::after{right:-4px}
+.seat[data-on="0"] .seatBack{background:linear-gradient(180deg,var(--line) 0 8px,var(--wash) 8px)}
+.seat[data-me="1"] .seatBack{border:1.5px solid var(--ink);background:linear-gradient(180deg,color-mix(in srgb,var(--ink) 14%,var(--paper)) 0 8px,var(--paper) 8px)}
+.seat[data-hit="1"] .seatBack{background:linear-gradient(180deg,color-mix(in srgb,var(--sc) 38%,var(--paper)) 0 8px,color-mix(in srgb,var(--sc) 15%,var(--paper)) 8px)}
+.seatBelt{position:relative;width:76%;height:3px;margin:6px auto 0;overflow:hidden;background:var(--line)}
+.seatBelt::after{content:"";position:absolute;inset:0 auto 0 0;width:var(--p,0%);border-radius:2px;background:var(--bc,var(--faint));transition:width .5s var(--ease)}
+.seat[data-st="complete"] .seatBelt{width:76%;background:var(--line);--p:100%;--bc:var(--ok)}
+.seat[data-st="almost"] .seatBelt{width:76%;background:var(--line);--p:76%;--bc:var(--accent)}
+.seat[data-st="starting"] .seatBelt{width:76%;background:var(--line);--p:42%;--bc:#D6A23E}
+.seat.vacant{height:34px;border-radius:12px 12px 7px 7px;border:1px dashed color-mix(in srgb,var(--ink) 16%,var(--line));opacity:.5}
+.seatDot{top:-4px;right:-4px;width:9px;height:9px;border-color:var(--paper)}
+.cabinLive{font-size:12px;letter-spacing:0;text-transform:none}
+.cabinWho small{font-family:${SERIF};font-style:italic;font-size:13px;color:var(--muted)}
+.mini{padding:13px 0}
+.sbar{margin-bottom:16px}
+.empty{padding:64px 12px}
+@media (max-width:759px){
+  .head{padding:16px 20px 8px}
+  .scroll{padding-left:20px;padding-right:20px}
+  .group{margin-top:34px}
+  .heroCard{margin-bottom:24px;padding-bottom:22px}
+}
+
+/* ── v12 boarding pass: header band, route row, printed frame, matching stub ── */
+.bpTicket{transform:none;filter:drop-shadow(0 18px 24px rgba(60,40,15,.16))}
+.hr[data-theme="dark"] .bpTicket{filter:drop-shadow(0 18px 26px rgba(0,0,0,.5))}
+.bpBody{padding:0 22px 22px;background:var(--paper)}
+.bpBody::after{content:"";position:absolute;inset:52px 8px 8px;border:1px solid var(--line);border-radius:12px;pointer-events:none}
+.bpHead{margin:0 -22px 20px;padding:13px 22px;border:0;border-radius:19px 0 0 0;background:var(--ink);color:var(--bg);font-size:11px;letter-spacing:.16em;align-items:center}
+.bpAir{display:inline-flex;align-items:center;gap:7px}
+.bpRoute{display:flex;align-items:center;gap:12px;margin:0 0 20px}
+.bpRoute b{font-family:${SERIF};font-weight:400;font-size:32px;letter-spacing:.03em;line-height:1}
+.bpRoute span{position:relative;flex:1;height:18px;display:grid;place-items:center;color:var(--muted)}
+.bpRoute span::before{content:"";position:absolute;left:0;right:0;top:50%;border-top:1.5px dashed var(--line-strong)}
+.bpRoute svg{position:relative;box-sizing:content-box;padding:0 7px;background:var(--paper);transform:rotate(45deg)}
+.bpStub{padding:56px 12px 18px;background:linear-gradient(var(--ink),var(--ink)) top/100% 41px no-repeat,var(--paper)}
+@media (max-width:520px){
+  .bpBody{padding:0 16px 18px}
+  .bpHead{margin:0 -16px 16px;padding:12px 16px}
+  .bpBody::after{inset:48px 6px 6px}
+  .bpStub{padding:52px 8px 16px;background:linear-gradient(var(--ink),var(--ink)) top/100% 38px no-repeat,var(--paper)}
+  .bpRoute b{font-size:28px}
+}
+
+/* ── v12 feedback: toasts hold while hovered or focused ── */
+.toast:hover .toastBar,.toast:focus-within .toastBar{animation-play-state:paused}
+
+/* ── v12 keyboard: shortcuts sheet and breathing-room focus rings ── */
+.hr input:focus-visible,.hr textarea:focus-visible,.hr select:focus-visible{outline-offset:1px}
+.scList{list-style:none;margin:0;padding:0}
+.scList li{display:flex;align-items:center;justify-content:space-between;gap:16px;padding:13px 2px;border-bottom:1px solid var(--line);font-size:15px}
+.scList li:last-child{border-bottom:0}
+.scKeys{display:inline-flex;gap:6px;flex:none}
+.scKeys .kbd{min-width:26px;text-align:center;padding:3px 7px;border:1px solid var(--line);font-size:12px}
+
+/* ── v12 edge cases: long words never push a layout sideways, and very small phones get tighter spacing ── */
+.hr{overflow-wrap:break-word}
+.rowTitle,.rowMeta,.msg,.dmMsg,.cmt,.note,.ann,.mat,.matHead,.matBody,.toast,.h1,.tourH,.tourP{min-width:0;overflow-wrap:anywhere}
+.hr img,.hr video{max-width:100%;height:auto}
+}
+
+/* ── v12 a11y: native controls follow the accent, high-contrast preference is honoured ── */
+.hr{accent-color:var(--accent);caret-color:var(--accent)}
+@media (prefers-contrast:more){
+  .hr,.hr[data-theme="dark"]{--line:color-mix(in srgb,var(--ink) 38%,var(--paper));--muted:color-mix(in srgb,var(--ink) 82%,var(--paper));--faint:color-mix(in srgb,var(--ink) 64%,var(--paper))}
+  .hr :focus-visible{outline-width:3px}
+}
+@media (forced-colors:active){
+  .hr :focus-visible{outline:2px solid Highlight}
+}
+
+/* ── v12 micro-interactions: hover and press for the controls that had neither ── */
+.back,.matHead,.subjHead,.mBtn,.filterPill,.mcPill,.bpLink{transition:color .2s var(--ease),background .2s var(--ease),border-color .2s var(--ease),box-shadow .2s var(--ease),transform .2s var(--spring),opacity .2s}
+@media (hover:hover){
+  .back:hover,.bpLink:hover{color:var(--ink)}
+  .matHead:hover,.subjHead:hover{background:var(--wash);box-shadow:0 0 0 6px var(--wash);border-radius:10px}
+  .mBtn:hover,.filterPill:hover,.mcPill:hover{border-color:var(--line-strong);color:var(--ink)}
+}
+.back:active,.bpLink:active{opacity:.65}
+.mBtn:active,.filterPill:active,.mcPill:active{transform:scale(.98)}
+.matHead:active,.subjHead:active{opacity:.8}
+
+/* ── v12 skip link: first stop for keyboard users, hidden until focused ── */
+.skip{position:fixed;left:12px;top:-64px;z-index:100;padding:10px 16px;border-radius:12px;background:var(--ink);color:var(--bg);font-size:14px;font-weight:600;text-decoration:none;transition:top .2s var(--ease)}
+.skip:focus{top:12px}
+#main:focus{outline:none}
+
+/* ── v12 draft note ── */
+.draftNote{display:flex;align-items:center;justify-content:space-between;gap:12px;margin:0 0 18px;padding:11px 14px;border:1px solid var(--line);border-radius:12px;background:var(--wash);color:var(--muted);font-size:14px}
+.draftNote button{flex:none;border:0;background:none;padding:0;font:inherit;font-weight:600;color:var(--ink);text-decoration:underline;text-underline-offset:3px;cursor:pointer}
+
+/* ── v12 dialog focus: the sheet itself takes programmatic focus without a ring ── */
+.sheet:focus{outline:none}
+
+/* ── v12 form hint: says why Save is waiting ── */
+.formHint{margin:0 0 12px;color:var(--muted);font-size:14px}
 `;
 
 /* ───────────────────────── small pieces ───────────────────────── */
@@ -1554,7 +1543,7 @@ function useSlider(dep) {
     return () => cancelAnimationFrame(id);
   }, [box, ready]);
   const node = (
-    <span className="slider" aria-hidden="true" data-ready={ready ? 1 : 0}
+    <span className="slider" aria-hidden="true" data-rv="t-tasks" data-ready={ready ? 1 : 0}
       style={box ? { transform: `translate(${box.x}px,${box.y}px)`, width: box.w, height: box.h, opacity: 1 } : { opacity: 0 }} />
   );
   return [ref, node];
@@ -1603,6 +1592,8 @@ function Sheet({ open, onClose, title, children }) {
   const [show, setShow] = useState(false);
   const [dy, setDy] = useState(0);
   const grab = useRef(null);
+  const sheetRef = useRef(null);
+  const opener = useRef(null);
   const kept = useRef(children);
   if (open) kept.current = children; // keep the content on screen while the sheet slides away
   useEffect(() => {
@@ -1619,10 +1610,38 @@ function Sheet({ open, onClose, title, children }) {
   }, [open]);
   useEffect(() => {
     if (!open) return;
-    const h = (e) => { if (e.key === "Escape") onClose(); };
+    const h = (e) => {
+      if (e.key === "Escape") { onClose(); return; }
+      if (e.key !== "Tab") return;
+      // Keep Tab and Shift+Tab inside the sheet while it is open.
+      const el = sheetRef.current;
+      if (!el) return;
+      const f = [...el.querySelectorAll('a[href],button:not([disabled]),input:not([disabled]),select:not([disabled]),textarea:not([disabled]),[tabindex]:not([tabindex="-1"])')].filter((n) => n.offsetParent !== null);
+      if (!f.length) { e.preventDefault(); el.focus(); return; }
+      const first = f[0];
+      const last = f[f.length - 1];
+      const at = document.activeElement;
+      if (e.shiftKey && (at === first || at === el)) { e.preventDefault(); last.focus(); }
+      else if (!e.shiftKey && at === last) { e.preventDefault(); first.focus(); }
+    };
     window.addEventListener("keydown", h);
     return () => window.removeEventListener("keydown", h);
   }, [open, onClose]);
+  // Move focus into the sheet when it opens (unless the content already took it), and hand it back on close.
+  useEffect(() => {
+    if (!open) return undefined;
+    opener.current = document.activeElement;
+    const t = setTimeout(() => {
+      const el = sheetRef.current;
+      if (el && !el.contains(document.activeElement)) el.focus({ preventScroll: true });
+    }, 60);
+    return () => {
+      clearTimeout(t);
+      const o = opener.current;
+      opener.current = null;
+      if (o && o.isConnected && typeof o.focus === "function") o.focus({ preventScroll: true });
+    };
+  }, [open]);
   if (!mounted) return null;
   const gs = (e) => { grab.current = e.touches[0].clientY; };
   const gm = (e) => { if (grab.current != null) setDy(Math.max(0, e.touches[0].clientY - grab.current)); };
@@ -1630,7 +1649,7 @@ function Sheet({ open, onClose, title, children }) {
   return (
     <div className="overlay" data-show={show ? 1 : 0} role="dialog" aria-modal="true" aria-label={title}>
       <div className="scrim" onClick={onClose} style={dy ? { opacity: Math.max(0.2, 1 - dy / 320) } : undefined} />
-      <div className="sheet" style={dy ? { transform: `translateY(${dy}px)`, transition: "none" } : undefined}>
+      <div className="sheet" ref={sheetRef} tabIndex={-1} style={dy ? { transform: `translateY(${dy}px)`, transition: "none" } : undefined}>
         <div className="grab" onTouchStart={gs} onTouchMove={gm} onTouchEnd={ge} onTouchCancel={ge} />
         <div className="sheetHead">
           <h2 className="serif" style={{ fontSize: 24, fontWeight: 400, margin: 0 }}>{title}</h2>
@@ -1711,32 +1730,50 @@ const findTourTarget = (name) =>
     return r.width > 0 && r.height > 0;
   }) || null;
 
+// Each step may list `show`: the pieces of the app it unwraps (see UNBOX_TOKENS). A piece stays hidden, holding its
+// place, until the tour reaches the step that shows it. The pieces go top to bottom, so nothing already unpacked moves.
 const tourSteps = (bp, user) => [
   {
-    id: "hello", center: true, enter: { demo: "todo" },
+    id: "hello", center: true, enter: { demo: "todo" }, show: [],
     title: `Welcome to Homeroom, ${user}.`,
-    body: "This is your class's shared list. Let's try it for real. It takes about a minute, and you'll tap everything yourself.",
+    body: "Your class's homework list has arrived, all wrapped up. Let's unpack it together, one piece at a time. Tap along as we go, and take as long as you like.",
   },
   {
-    id: "tick", target: "practice-check", enter: { demo: "todo" },
+    id: "today", target: "hero", enter: { demo: "todo" }, show: ["logo", "chip", "t-tasks", "hero"],
+    title: "Your day, at a glance",
+    body: "Every day starts here. The ring shows how much of this week you've finished, and the flame counts the days in a row you've ticked something off.",
+  },
+  {
+    id: "helpers", target: "quick-row", enter: {}, show: ["quick"],
+    title: "Three little helpers",
+    body: "Plan my evening turns what's due into a schedule. Groups lets you team up with classmates by subject. The focus timer keeps you going while you work.",
+  },
+  {
+    id: "views", target: "view-toggle", enter: {}, show: ["views"],
+    title: "See the week your way",
+    body: bp === "phone" ? "Switch to the calendar to see everything laid out by day." : "Switch to the calendar to see everything by day. The third button is a board you can drag cards across.",
+    hint: "Tap the calendar", done: (c) => c.mode === "calendar",
+  },
+  {
+    id: "tick", target: "practice-check", enter: { demo: "todo" }, show: ["list"],
     title: "Check off a task",
-    body: "Tap the circle when you finish something. Your classmates see how many people have finished each task.",
+    body: "Here's your first task, just for practice. Tap the circle when you finish something, and your classmates will see how many people have done it.",
     hint: "Tap the circle", done: (c) => c.demo === "done",
   },
   {
-    id: "open", target: "practice-row", enter: {},
+    id: "open", target: "practice-row", enter: {}, show: ["side"],
     title: "Open a task",
-    body: "Tap a task to see its notes, comments, and who in your class has already finished it.",
+    body: "Tap a task to see its notes, the comments, and which of your classmates have already finished it.",
     hint: "Tap the task", done: (c) => c.detail,
   },
   {
     id: "status", target: "detail-status", enter: { detail: true },
-    title: "Not started, in progress, done",
-    body: "Mark where you are, not just when you're finished. Set this one to In progress.",
+    title: "Say where you are",
+    body: "Not started, in progress, or done. Mark where you are, not just when you're finished. Set this one to In progress.",
     hint: "Tap In progress", done: (c) => c.demo === "progress",
   },
   {
-    id: "add", target: "new-task", enter: {},
+    id: "add", target: "new-task", enter: {}, show: ["new"],
     title: "Add something for the class",
     body: "Anyone can add a task, and everyone in your class sees it. Open the form.",
     hint: bp === "phone" ? "Tap the plus button" : "Click New task", done: (c) => c.form,
@@ -1748,21 +1785,15 @@ const tourSteps = (bp, user) => [
     hint: "Try it, or tap Next",
   },
   {
-    id: "views", target: "view-toggle", enter: {},
-    title: "See the week your way",
-    body: bp === "phone" ? "Switch to the calendar to see everything laid out by day." : "Switch to the calendar to see everything by day. The third button is a board you can drag cards across.",
-    hint: "Tap the calendar", done: (c) => c.mode === "calendar",
-  },
-  {
-    id: "done", target: "tab-done", enter: {},
-    title: "Finished tasks wait in Done",
+    id: "done", target: "tab-done", enter: {}, show: ["t-done", "p-done"],
+    title: "Finished work waits in Done",
     body: "Tick something off and it moves here, grouped by subject. Tap its circle to put it back.",
     hint: "Open Done", done: (c) => c.tab === "done",
   },
   {
-    id: "review", target: "tab-review", enter: {},
+    id: "review", target: "tab-review", enter: {}, show: ["t-review", "p-review"],
     title: "Study without the stress",
-    body: "Review has nine ways to study your class's notes: flashcards, quizzes, blurting and more.",
+    body: "Review turns your class's notes into flashcards, quizzes, blurting and more. Nine ways to study, all in one place.",
     hint: "Open Review", done: (c) => c.tab === "review",
   },
   {
@@ -1772,13 +1803,13 @@ const tourSteps = (bp, user) => [
     hint: "Try it, or tap Next",
   },
   {
-    id: "ask", target: "tab-ask", enter: { tab: "review" },
+    id: "ask", target: "tab-ask", enter: { tab: "review" }, show: ["t-ask", "p-ask"],
     title: "Ask the assistant",
     body: "Ask what's due, get a plan for tonight, or tell it to add a task for you.",
     hint: "Open Ask", done: (c) => c.tab === "ask",
   },
   {
-    id: "cabin", target: bp === "desktop" ? "cabin" : "cabin-btn", enter: {},
+    id: "cabin", target: bp === "desktop" ? "cabin" : "cabin-btn", enter: {}, show: ["cabin"],
     title: "Your class, as a plane",
     body: bp === "desktop"
       ? "Everyone has a seat. A green dot means online, and the bar under a seat shows how far along they are this week. Tap someone who's online to message them. Pick a subject at the top to light up your groupmates."
@@ -1786,59 +1817,109 @@ const tourSteps = (bp, user) => [
     hint: "Take a look, then tap Next",
   },
   {
-    id: "search", target: "search", enter: {},
+    id: "search", target: "search", enter: {}, show: ["search"],
     title: "Find anything fast",
     body: bp === "phone" ? "Search every task and note your class has shared." : "Search every task and note your class has shared. Press / or Ctrl K from anywhere.",
     hint: bp === "phone" ? "Tap the magnifier" : "Click the search bar", done: (c) => c.search,
   },
   {
-    id: "end", center: true, enter: {},
-    title: `You're all set, ${user}.`,
-    body: "Tick things off, add what's due, and help your class stay ahead. You can replay this tour from your account menu.",
+    id: "account", target: "acct", enter: {}, show: ["acct", "music"],
+    title: "Your own corner",
+    body: "Your name opens your account: light or dark, an accent colour, sounds, and your subjects. The note in the header plays quiet background music if you like it. You can play this introduction again from there.",
+    hint: "Take a look, then tap Next",
+  },
+  {
+    id: "end", center: true, enter: {}, show: UNBOX_TOKENS,
+    title: `Everything's unpacked, ${user}.`,
+    body: "Tick things off, add what's due, and help your class stay ahead. Everything is yours now.",
   },
 ];
 
-function Tour({ user, bp, ctx, go, onDone }) {
+function Tour({ user, bp, ctx, go, onDone, onReveal }) {
   const steps = useMemo(() => tourSteps(bp, user), [bp, user]);
   const [i, setI] = useState(0);
+  const [reached, setReached] = useState(0); // furthest step so far: going Back never re-wraps anything
   const step = steps[i];
   const last = steps.length - 1;
   const [rect, setRect] = useState(null);
   const [ok, setOk] = useState(false);
+  // reveal: the room stays lit while the new piece pops out of the box. show: then the spotlight and the card come in.
+  const [ph, setPh] = useState("show");
   const [settled, setSettled] = useState(false); // after the glide to a new target, stick to it with no lag
+  const [bits, setBits] = useState([]); // paper scraps that fly off a piece as it is unwrapped
   const [cardH, setCardH] = useState(230);
   const [vp, setVp] = useState({ w: window.innerWidth, h: window.innerHeight });
   const cardRef = useRef(null);
   const armed = useRef(false);
   const timer = useRef(null);
+  const seen = useRef(-1);
+  const calm = useRef(typeof window.matchMedia === "function" && window.matchMedia("(prefers-reduced-motion: reduce)").matches);
   const ctxRef = useRef(ctx); ctxRef.current = ctx;
   const goRef = useRef(go); goRef.current = go;
 
   const toStep = (n) => {
     clearTimeout(timer.current);
-    setI(Math.max(0, Math.min(last, n)));
+    const k = Math.max(0, Math.min(last, n));
+    setI(k);
+    setReached((r) => Math.max(r, k));
   };
+
+  // hand the app the list of pieces that are unpacked so far (before the first paint, so nothing flashes)
+  const pieces = useMemo(() => {
+    const set = new Set();
+    steps.slice(0, reached + 1).forEach((x) => (x.show || []).forEach((t) => set.add(t)));
+    return [...set];
+  }, [steps, reached]);
+  useLayoutEffect(() => { onReveal(pieces); }, [pieces]);
 
   // entering a step puts the app in the state the step needs (so Back and Skip always work)
   useEffect(() => {
     goRef.current(step.enter);
-    setOk(false); setSettled(false);
+    setOk(false); setSettled(false); setBits([]);
     armed.current = false;
-    const t2 = setTimeout(() => setSettled(true), 800);
-    Sound.play(step.center ? "pop" : "whoosh");
-    if (i === last) { Sound.play("stamp"); setTimeout(() => Sound.play("bell"), 260); }
+    const finale = i === last;
+    const before = new Set(steps.slice(0, i).flatMap((x) => x.show || []));
+    const added = (step.show || []).filter((t) => !before.has(t));
+    const onScreen = (t) => [...document.querySelectorAll(`[data-rv="${t}"]`)].find((e) => { const r = e.getBoundingClientRect(); return r.width > 0 && r.height > 0; });
+    const fresh = i > seen.current && added.some(onScreen);
+    seen.current = Math.max(seen.current, i);
+    // new pieces get a slow unwrapping with the lights up; steps that only change the view get a short pause
+    const R = calm.current ? 0 : fresh ? (finale ? 2300 : 1500) : i === 0 ? 0 : 450;
+    setPh(R ? "reveal" : "show");
+    const ts = [];
+    const at = (fn, ms) => { ts.push(setTimeout(fn, ms)); };
+    if (R) at(() => setPh("show"), R);
+    at(() => setSettled(true), R + 900);
+    Sound.play(i === 0 ? "pop" : "whoosh");
+    if (fresh) {
+      at(() => Sound.play(finale ? "boxOpen" : "pop"), 340);
+      if (!finale && !calm.current) {
+        at(() => {
+          const spots = [];
+          added.filter((t) => !t.startsWith("p-")).slice(0, 3).forEach((t) => {
+            const el = onScreen(t);
+            if (!el) return;
+            const r = el.getBoundingClientRect();
+            spots.push({ k: t, x: Math.round(r.left + r.width / 2), y: Math.round(r.top + Math.min(r.height / 2, 90)) });
+          });
+          setBits(spots);
+        }, 380);
+        at(() => setBits([]), 1900);
+      }
+    }
+    if (finale) { at(() => Sound.play("stamp"), R + 150); at(() => Sound.play("bell"), R + 420); }
     // arm once the app has settled, so a step that is already satisfied can't skip itself
-    const t = setTimeout(() => { armed.current = !!step.done && !step.done(ctxRef.current); }, 90);
-    return () => { clearTimeout(t); clearTimeout(t2); };
+    at(() => { armed.current = !!step.done && !step.done(ctxRef.current); }, 90);
+    return () => ts.forEach(clearTimeout);
   }, [i]);
 
-  // when the person does the thing, celebrate and move on
+  // when the person does the thing, celebrate, pause so it sinks in, and move on
   useEffect(() => {
     if (!armed.current || !step.done || !step.done(ctx)) return;
     armed.current = false;
     setOk(true);
     Sound.play("done");
-    timer.current = setTimeout(() => toStep(i + 1), 900);
+    timer.current = setTimeout(() => toStep(i + 1), 2400);
   }, [ctx.tab, ctx.detail, ctx.form, ctx.mode, ctx.search, ctx.demo, i]);
 
   useEffect(() => () => clearTimeout(timer.current), []);
@@ -1906,7 +1987,8 @@ function Tour({ user, bp, ctx, go, onDone }) {
       card = { left, top: Math.max(M, hole.y - GAP - cardH), side: "above", arrow: clamp(cx - left, 26, cw - 26) };
     }
   }
-  const blocks = rect && !step.center
+  // while a piece is being unwrapped nothing underneath can be tapped; afterwards the spotlight hole is the one live spot
+  const blocks = rect && !step.center && ph === "show"
     ? [
         { left: 0, top: 0, width: vp.w, height: Math.max(0, hole.y) },
         { left: 0, top: hole.y + hole.h, width: vp.w, height: Math.max(0, vp.h - hole.y - hole.h) },
@@ -1917,12 +1999,21 @@ function Tour({ user, bp, ctx, go, onDone }) {
 
   const interactive = !!step.done;
   const confetti = ["var(--accent)", "#E3AE46", "#6BA3D1", "#8B6B86", "#5F8B6D"];
+  const advance = () => { Sound.play("tap"); toStep(i + 1); };
 
   return (
-    <div className={settled ? "tour settled" : "tour"} role="presentation">
+    <div className={settled ? "tour settled" : "tour"} data-ph={ph} role="presentation">
       {blocks.map((b, k) => <div key={k} className="tourBlock" style={b} />)}
       <div className="tourHole" data-ok={ok ? 1 : 0} data-none={!rect || step.center ? 1 : 0}
         style={{ left: hole.x, top: hole.y, width: hole.w, height: hole.h, borderRadius: hole.r }} />
+      {bits.map((b) => (
+        <div key={b.k} className="tourBurst" style={{ left: b.x, top: b.y }} aria-hidden="true">
+          {Array.from({ length: 9 }, (_, k) => {
+            const a = (k / 9) * Math.PI * 2 + (b.x % 7), d = 52 + ((k * 29) % 44);
+            return <i key={k} className="scrap" style={{ "--x": Math.round(Math.cos(a) * d) + "px", "--y": Math.round(Math.sin(a) * d - 18) + "px", "--r": ((k * 71) % 360) + "deg", animationDelay: (k % 3) * 40 + "ms" }} />;
+          })}
+        </div>
+      ))}
       <div className={step.center ? "tourCard center" : "tourCard"} ref={cardRef} role="dialog" aria-label="Homeroom tour" aria-live="polite"
         style={{ left: card.left, top: card.top, width: cw }}>
         {card.side !== "none" && <i className="tourArrow" data-side={card.side} style={card.side === "right" ? { top: card.arrow - 8 } : { left: card.arrow - 8 }} />}
@@ -1949,7 +2040,14 @@ function Tour({ user, bp, ctx, go, onDone }) {
           )}
           <h3 className="tourH">{step.title}</h3>
           <p className="tourP">{step.body}</p>
-          {step.id === "end" && <p className="tourCredit">Made by Nathaniel Visaya for this class.</p>}
+          {step.id === "hello" && <p className="tourSmall">A little app by <b>Nathan</b>, for this class.</p>}
+          {step.id === "end" && (
+            <div className="tourSign">
+              <small>Made, start to finish, by one person</small>
+              <b>Nathaniel Visaya</b>
+              <small>Nathan, if you're in a hurry. Made for this class.</small>
+            </div>
+          )}
           {interactive && (
             ok
               ? <div className="tourDo ok"><Check size={15} strokeWidth={3} />Nice</div>
@@ -1961,17 +2059,17 @@ function Tour({ user, bp, ctx, go, onDone }) {
           {step.center ? (
             <>
               {i === 0 ? <button className="tourLink" onClick={onDone}>Skip tour</button> : <button className="tourLink" onClick={() => { Sound.play("tap"); toStep(i - 1); }}>Back</button>}
-              <button className="btn accent" autoFocus onClick={() => { Sound.play("tap"); i === last ? onDone() : toStep(i + 1); }}>{i === last ? "Open my list" : "Show me around"}</button>
+              <button className="btn accent" autoFocus onClick={() => { if (i === last) { Sound.play("tap"); onDone(); } else advance(); }}>{i === last ? "Open my list" : "Start unpacking"}</button>
             </>
           ) : (
             <>
               <button className="tourLink" onClick={() => { Sound.play("tap"); toStep(i - 1); }}>Back</button>
-              <div className="tourDots" aria-label={`Step ${i} of ${last - 1}`}>
-                {steps.slice(1, last).map((_, k) => <i key={k} className={k + 1 === i ? "on" : k + 1 < i ? "past" : ""} />)}
+              <div className="tourProg" role="progressbar" aria-label="Tour progress" aria-valuemin={1} aria-valuemax={last - 1} aria-valuenow={i}>
+                <i style={{ width: `${(i / (last - 1)) * 100}%` }} />
               </div>
-              {interactive
-                ? <button className="tourLink" onClick={() => { Sound.play("tap"); toStep(i + 1); }}>Skip step</button>
-                : <button className="btn accent small" onClick={() => { Sound.play("tap"); toStep(i + 1); }}>Next</button>}
+              {interactive && !ok
+                ? <button className="tourLink" onClick={advance}>Skip step</button>
+                : <button className="btn accent small" onClick={advance}>Next</button>}
             </>
           )}
         </div>
@@ -2161,7 +2259,7 @@ function ClassGate({ classes, setClasses, onChoose }) {
   const [cls, setCls] = useState(null);
   return (
     <div className="authBody">
-      <div className="mark authBrand" style={{ fontSize: 30, marginBottom: 18 }}>Homeroom</div>
+      <div className="mark authBrand" style={{ fontSize: 32, marginBottom: 18 }}>Homeroom</div>
       <h1 className="h1">Pick your class</h1>
       <p className="sub">Tasks and notes are shared only with the people in your class.</p>
       <ClassPicker classes={classes} value={cls} onPick={setCls} onCreated={setClasses} />
@@ -2226,7 +2324,7 @@ function Auth({ onAuthed, onNeedPass }) {
   const subs = { signin: "Sign in to see what's due.", signup: "Just an email and a password. Your boarding pass comes next.", forgot: "We'll email you a link to choose a new password." };
   return (
     <div className="authBody">
-      <div className="mark authBrand" style={{ fontSize: 34, marginBottom: 22 }}>Homeroom</div>
+      <div className="mark authBrand" style={{ fontSize: 32, marginBottom: 22 }}>Homeroom</div>
       <h1 className="h1" style={{ marginTop: 0 }}>{titles[mode]}</h1>
       <p className="sub" style={{ marginBottom: 26 }}>{subs[mode]}</p>
       <div className="field">
@@ -2274,7 +2372,7 @@ function ResetPassword({ onDone }) {
   };
   return (
     <div className="authBody">
-      <div className="mark authBrand" style={{ fontSize: 34, marginBottom: 22 }}>Homeroom</div>
+      <div className="mark authBrand" style={{ fontSize: 32, marginBottom: 22 }}>Homeroom</div>
       <h1 className="h1" style={{ marginTop: 0 }}>Choose a new password</h1>
       <p className="sub" style={{ marginBottom: 26 }}>You'll stay signed in after this.</p>
       <div className="field">
@@ -2423,7 +2521,7 @@ function MinecraftPanel({ done, total, linked, onLink, onUnlink }) {
     return (
       <div className="mc">
         <div className="mcIcon"><Gamepad2 size={26} /></div>
-        <h3 className="serif" style={{ fontSize: 26, fontWeight: 400, margin: "0 0 8px" }}>{linked ? "Access is paused" : "Almost there"}</h3>
+        <h3 className="serif" style={{ fontSize: 28, fontWeight: 400, margin: "0 0 8px" }}>{linked ? "Access is paused" : "Almost there"}</h3>
         <p style={{ color: C.muted, lineHeight: 1.55, margin: 0 }}>
           {total === 0 ? "There are no tasks yet." : `${total - done} of ${total} tasks are still open.`} Finish every task in your class's quarter and you can join the Minecraft server{linked ? ` as ${linked}` : ""}.
         </p>
@@ -2433,7 +2531,7 @@ function MinecraftPanel({ done, total, linked, onLink, onUnlink }) {
   return (
     <div className="mc">
       <div className="mcIcon" data-on="1"><Gamepad2 size={26} /></div>
-      <h3 className="serif" style={{ fontSize: 26, fontWeight: 400, margin: "0 0 8px", lineHeight: 1.2 }}>Congratulations on completing every task!</h3>
+      <h3 className="serif" style={{ fontSize: 28, fontWeight: 400, margin: "0 0 8px", lineHeight: 1.2 }}>Congratulations on completing every task!</h3>
       <div className="field" style={{ marginTop: 14 }}>
         <label htmlFor="mcn">{linked ? "Your Minecraft username" : "Enter your username to be able to join the Minecraft server"}</label>
         <input id="mcn" className="input" value={name} maxLength={16} placeholder="Your Minecraft username" autoCapitalize="none" autoCorrect="off" spellCheck={false}
@@ -2493,12 +2591,54 @@ function DoneTab({ tasks, progress, completions, user, quarter, setStatus, openT
   );
 }
 
+/* One owner for the page title: the active tab sets the base, the focus timer adds a countdown in front. */
+let titleBase = "Homeroom";
+let titleTimer = "";
+const applyTitle = () => { document.title = titleTimer ? `${titleTimer} · ${titleBase}` : titleBase; };
+
+/* A half-written new task survives an accidental close or refresh. Local to this browser, cleared on save and sign-out. */
+const DRAFT_KEY = "hr:draft:task";
+const readDraft = () => {
+  try {
+    const d = JSON.parse(localStorage.getItem(DRAFT_KEY) || "null");
+    if (!d || typeof d !== "object") return null;
+    const title = String(d.title || "").slice(0, 200);
+    const notes = String(d.notes || "").slice(0, 2000);
+    if (!title.trim() && !notes.trim()) return null;
+    return {
+      title,
+      notes,
+      subject: String(d.subject || "").slice(0, 40),
+      type: TYPES.includes(d.type) ? d.type : "Homework",
+      priority: PRIORITIES.includes(d.priority) ? d.priority : "High",
+      deadline: /^\d{4}-\d{2}-\d{2}$/.test(d.deadline || "") && d.deadline >= todayISO() ? d.deadline : addDays(todayISO(), 1),
+    };
+  } catch { return null; }
+};
+const writeDraft = (f) => {
+  try {
+    if (f.title.trim() || f.notes.trim()) {
+      localStorage.setItem(DRAFT_KEY, JSON.stringify({ title: f.title, subject: f.subject, type: f.type, priority: f.priority, deadline: f.deadline, notes: f.notes }));
+    } else localStorage.removeItem(DRAFT_KEY);
+  } catch { /* storage blocked: the draft just isn't kept */ }
+};
+const clearDraft = () => { try { localStorage.removeItem(DRAFT_KEY); } catch { /* storage blocked */ } };
+
 function TaskForm({ initial, subjects, groups, defQuarter, onSave, onCancel, onAddSubject }) {
+  const [draft0] = useState(() => (initial ? null : readDraft()));
+  const [restored, setRestored] = useState(!!draft0);
+  const blank = () => ({ title: "", subject: "", type: "Homework", priority: "High", deadline: addDays(todayISO(), 1), notes: "", quarter: defQuarter, groupId: null, proof: true });
   const [f, setF] = useState(
     initial
       ? { quarter: defQuarter, proof: true, groupId: null, ...initial }
-      : { title: "", subject: "", type: "Homework", priority: "High", deadline: addDays(todayISO(), 1), notes: "", quarter: defQuarter, groupId: null, proof: true }
+      : { ...blank(), ...(draft0 || {}) }
   );
+  useEffect(() => {
+    if (initial) return undefined;
+    const t = setTimeout(() => writeDraft(f), 400);
+    return () => clearTimeout(t);
+  }, [f, initial]);
+  const save = (...args) => { clearDraft(); return onSave(...args); };
   const [newGroup, setNewGroup] = useState(null); // null = not creating one, string = name being typed
   const set = (k, v) => setF((p) => ({ ...p, [k]: v, ...(k === "subject" || k === "quarter" ? { groupId: null } : {}) }));
   const valid = f.title.trim() && f.subject.trim() && f.deadline;
@@ -2518,6 +2658,7 @@ function TaskForm({ initial, subjects, groups, defQuarter, onSave, onCancel, onA
   return (
     <div>
       {!initial && <QuickAdd subjects={subjects} onFill={fill} />}
+      {restored && <div className="draftNote">Picked up where you left off. <button type="button" onClick={() => { clearDraft(); setF(blank()); setRestored(false); }}>Start fresh</button></div>}
       <div className="field">
         <label htmlFor="t">What is it?</label>
         <input id="t" className="input" value={f.title} onChange={(e) => set("title", e.target.value)} placeholder="Math quiz 2.2" />
@@ -2573,9 +2714,14 @@ function TaskForm({ initial, subjects, groups, defQuarter, onSave, onCancel, onA
         <label htmlFor="n">Guidelines or notes</label>
         <textarea id="n" className="input" value={f.notes} onChange={(e) => set("notes", e.target.value)} placeholder="Pages, what to bring, how it's graded" />
       </div>
+      {!valid && (f.title.trim() || f.subject.trim()) && (
+        <p className="formHint" id="formHint" role="status">
+          {!f.title.trim() ? "Give it a name to add it." : !f.subject.trim() ? "Pick a subject to add it." : "Choose a deadline to add it."}
+        </p>
+      )}
       <div style={{ display: "flex", gap: 10 }}>
         <button className="btn ghost" onClick={onCancel}>Cancel</button>
-        <button className="btn accent" style={{ flex: 1 }} disabled={!valid} onClick={() => onSave({ ...f, title: f.title.trim(), subject: f.subject.trim() }, newGroup && newGroup.trim() ? { name: newGroup.trim() } : null)}>
+        <button className="btn accent" style={{ flex: 1 }} disabled={!valid} aria-describedby={!valid ? "formHint" : undefined} onClick={() => save({ ...f, title: f.title.trim(), subject: f.subject.trim() }, newGroup && newGroup.trim() ? { name: newGroup.trim() } : null)}>
           {initial ? "Save changes" : "Add to class"}
         </button>
       </div>
@@ -2626,7 +2772,7 @@ function TaskRow({ t, status, finished, groupName, proofState, i, selected, leav
       <div className="row" role="button" tabIndex={0} data-sel={selected ? 1 : 0} data-tour={t.id === DEMO_ID ? "practice-row" : undefined}
         style={{ transform: `translateX(${dx}px)`, transition: drag ? "none" : "transform .4s var(--ease), border-color .25s, background .25s" }}
         onClick={() => { if (g.current.moved) return; onOpen(); }}
-        onKeyDown={(e) => e.key === "Enter" && onOpen()}>
+        onKeyDown={(e) => { if (e.target !== e.currentTarget) return; if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onOpen(); } }}>
         <button className="check" data-s={status} data-pop={pop ? 1 : 0} data-tour={t.id === DEMO_ID ? "practice-check" : undefined} aria-label={done ? "Mark as not done" : "Mark as done"} onClick={(e) => { e.stopPropagation(); onToggle(); }}>
           {done && <Check size={14} strokeWidth={3} />}
           {pop && (
@@ -2724,7 +2870,7 @@ function Stat({ icon, n, label, tone }) {
   );
 }
 
-function TasksTab({ user, tasks, progress, completions, announcements, weeklies, onOpenWeekly, dismissAnn, setStatus, openTask, editTask, ui, setUi, loading, onRefresh, onPlan, classGroups, proofs, openGroups, bp, selectedId, streak, openFocus }) {
+function TasksTab({ user, tasks, progress, completions, announcements, weeklies, onOpenWeekly, dismissAnn, setStatus, openTask, editTask, ui, setUi, loading, onRefresh, onPlan, onNew, classGroups, proofs, openGroups, bp, selectedId, streak, openFocus }) {
   const [hideNote, setHideNote] = useState(false);
   const [fOpen, setFOpen] = useState(false);
   const [leaving, setLeaving] = useState({});
@@ -2817,7 +2963,7 @@ function TasksTab({ user, tasks, progress, completions, announcements, weeklies,
   }
   return (
     <Scroll onRefresh={onRefresh} wide={mode === "board"}>
-      <div className="heroCard spot">
+      <div className="heroCard spot" data-rv="hero" data-tour="hero">
         <div className="heroBody">
           <div className="heroDate">{new Date().toLocaleDateString(undefined, { weekday: "long", month: "long", day: "numeric" })}</div>
           <h1 className="h1">{greet}, {user}.</h1>
@@ -2831,7 +2977,7 @@ function TasksTab({ user, tasks, progress, completions, announcements, weeklies,
         <Ring celebrate pct={wkPct} size={bp === "phone" ? 64 : 88} stroke={7}><Pct v={wkPct} /><span>this week</span></Ring>
       </div>
       {anns.map((a) => (
-        <div className="ann" key={a.id}>
+        <div className="ann" key={a.id} data-rv="hero">
           <div>
             <small>From your admin, {timeAgo(a.at)}</small>
             <p>{a.text}</p>
@@ -2840,7 +2986,7 @@ function TasksTab({ user, tasks, progress, completions, announcements, weeklies,
         </div>
       ))}
       {wkBanner && !hideWk && (
-        <div className="note" role="status">
+        <div className="note" role="status" data-rv="hero">
           <div>
             <p><span>{wkBanner.title}</span> {wkBanner.text}</p>
             <button className="btn ghost small" onClick={() => onOpenWeekly(wkBanner.ws)}>Open the weekly reviewer</button>
@@ -2848,7 +2994,8 @@ function TasksTab({ user, tasks, progress, completions, announcements, weeklies,
           <button className="iconBtn" style={{ width: 28, height: 28, flex: "none" }} onClick={() => setHideWk(true)} aria-label="Dismiss"><X size={16} /></button>
         </div>
       )}
-      <div className="quickRow">\1
+      <div className="quickRow" data-rv="quick" data-tour="quick-row">
+        <button className="btn ghost small" onClick={onPlan}>
           <Sparkles size={14} style={{ verticalAlign: -2, marginRight: 7 }} />Plan my evening
         </button>
         <button className="btn ghost small" onClick={openGroups}>
@@ -2858,7 +3005,7 @@ function TasksTab({ user, tasks, progress, completions, announcements, weeklies,
           <Timer size={14} style={{ verticalAlign: -2, marginRight: 7 }} />Focus timer
         </button>
       </div>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10 }}>
+      <div data-rv="views" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10 }}>
         {mode === "board" ? (
           <span className="dragHint">Drag a card to change its status</span>
         ) : mode === "list" ? (
@@ -2866,7 +3013,7 @@ function TasksTab({ user, tasks, progress, completions, announcements, weeklies,
         ) : (
           <div style={{ display: "flex", alignItems: "center", gap: 2 }}>
             <button className="iconBtn" onClick={() => shiftMonth(-1)} aria-label="Previous month"><ChevronLeft size={20} /></button>
-            <span className="serif" style={{ fontSize: 19, minWidth: 128, textAlign: "center" }}>{monthLabel}</span>
+            <span className="serif" style={{ fontSize: 20, minWidth: 128, textAlign: "center" }}>{monthLabel}</span>
             <button className="iconBtn" onClick={() => shiftMonth(1)} aria-label="Next month"><ChevronRight size={20} /></button>
           </div>
         )}
@@ -2881,7 +3028,7 @@ function TasksTab({ user, tasks, progress, completions, announcements, weeklies,
         </div>
         </div>
       </div>
-      <div className="chips">
+      <div className="chips" data-rv="views">
         {["All", ...subjects].map((s) => (
           <button key={s} className="chip" aria-pressed={subj === s} onClick={() => { Sound.play("tap"); setSubj(s); }}>
             {s !== "All" && <span className="dot" style={{ background: subjColor(s), margin: 0 }} />}{s}
@@ -2914,13 +3061,14 @@ function TasksTab({ user, tasks, progress, completions, announcements, weeklies,
       </div>
       {loading && tasks.length === 0 && <SkeletonRows />}
       {!loading && mode === "list" && groups.length === 0 && (
-        <div className="empty">
+        <div className="empty" data-rv="list">
           <div className="serif">{view === "done" ? "Nothing finished yet" : "You're all caught up"}</div>
           {view === "done" ? "Tasks you check off will collect here." : "Add something with the plus button, or ask the assistant."}
+          {view !== "done" && onNew && <div><button className="btn accent small" style={{ marginTop: 16 }} onClick={onNew}>Add a task</button></div>}
         </div>
       )}
       {mode === "list" && groups.map((g) => (
-        <section className="group" key={g.meta ? g.meta.group.id : g.key}>
+        <section className="group" data-rv="list" key={g.meta ? g.meta.group.id : g.key}>
           <h3>
             {g.meta && <span className="dot" style={{ background: subjColor(g.meta.group.subject), margin: 0, alignSelf: "center" }} />}
             {g.key}
@@ -2956,6 +3104,35 @@ function TasksTab({ user, tasks, progress, completions, announcements, weeklies,
 }
 
 /* ───────────────────────── plan my evening ───────────────────────── */
+
+function ShortcutList() {
+  const mac = typeof navigator !== "undefined" && /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent || "");
+  const rows = [
+    [[mac ? "⌘" : "Ctrl", "K"], "Search everything"],
+    [["/"], "Search, from anywhere"],
+    [["n"], "Add a task"],
+    [["g", "t"], "Go to Tasks"],
+    [["g", "d"], "Go to Done"],
+    [["g", "r"], "Go to Review"],
+    [["g", "a"], "Go to Ask"],
+    [["j"], "Next task in the list"],
+    [["k"], "Previous task in the list"],
+    [["Enter"], "Open the focused task"],
+    [["x"], "Mark the focused task done"],
+    [["?"], "Show this list"],
+    [["Esc"], "Close whatever is open"],
+  ];
+  return (
+    <ul className="scList" aria-label="Keyboard shortcuts">
+      {rows.map(([keys, what]) => (
+        <li key={what}>
+          <span>{what}</span>
+          <span className="scKeys">{keys.map((k, i) => <kbd className="kbd" key={i}>{k}</kbd>)}</span>
+        </li>
+      ))}
+    </ul>
+  );
+}
 
 function PlanPanel({ tasks, progress }) {
   const [mins, setMins] = useState(null);
@@ -2993,7 +3170,7 @@ function PlanPanel({ tasks, progress }) {
   return (
     <div>
       {busy && !text && <Waiting lines={["Looking at your deadlines", "Weighing what matters most", "Putting it in order"]} />}
-      {text && <div className="serif" style={{ fontSize: 17, lineHeight: 1.6, whiteSpace: "pre-wrap" }}>{text}</div>}
+      {text && <div className="serif" style={{ fontSize: 18, lineHeight: 1.6, whiteSpace: "pre-wrap" }}>{text}</div>}
       {err && <p className="err">{err}</p>}
       {!busy && <button className="btn ghost small" style={{ marginTop: 20 }} onClick={() => { setMins(null); setText(""); }}>Change the time</button>}
     </div>
@@ -3039,7 +3216,7 @@ function SearchPanel({ tasks, materials, onTask, onMaterial }) {
               <div className="rowMain">
                 <div className="rowTitle">{m.title}</div>
                 <div className="rowMeta"><span>{tasks.find((t) => t.id === m.taskId)?.title || "Removed task"}</span></div>
-                {snip(m) && <div style={{ fontSize: 13.5, color: C.muted, marginTop: 4, lineHeight: 1.5 }}>{snip(m)}</div>}
+                {snip(m) && <div style={{ fontSize: 14, color: C.muted, marginTop: 4, lineHeight: 1.5 }}>{snip(m)}</div>}
               </div>
             </button>
           ))}
@@ -3251,7 +3428,7 @@ function WeeklyReviewer({ tasks, materials, weeklies, user, saveWeekly, initialW
         {ts.length} {ts.length === 1 ? "task" : "tasks"} due, {ms.length} {ms.length === 1 ? "item" : "items"} of material
       </p>
       {busy && !live && <Waiting lines={["Gathering the week", "Pulling out the key points", "Writing it up"]} />}
-      {shown && <div className="serif" style={{ fontSize: 17, lineHeight: 1.65, whiteSpace: "pre-wrap" }}>{shown}</div>}
+      {shown && <div className="serif" style={{ fontSize: 18, lineHeight: 1.65, whiteSpace: "pre-wrap" }}>{shown}</div>}
       {saved && !busy && <p className="meta" style={{ marginTop: 14 }}>Made by {saved.by}, {timeAgo(saved.at)}. Everyone in the class can read this.</p>}
       {!saved && !busy && !err && <p style={{ color: C.muted, margin: "0 0 4px" }}>No reviewer for this week yet. It pulls together every task and note from the week into one page.</p>}
       {err && <p className="err">{err}</p>}
@@ -3428,29 +3605,56 @@ const ideaCovered = (text, idea) => {
 };
 
 // personal study data (your flashcard boxes, sessions, weekly plan): private to you
-function useStudy(user) {
+function useStudy(user, onSaved) {
   const [study, setS] = useState(null);
   const ref = useRef(null);
-  const timer = useRef(null);
+  const saver = useRef(null);
+  const savedCb = useRef(onSaved);
+  useEffect(() => { savedCb.current = onSaved; });
   useEffect(() => {
     let dead = false;
     store.get(`u:${user}:study`, true).then((v) => { if (dead) return; const s = { cards: {}, log: [], plan: null, ...(v && typeof v === "object" ? v : {}) }; ref.current = s; setS(s); });
     return () => { dead = true; };
   }, [user]);
+  // Saves wait 0.7s so a burst of answers is one write, but a pending save is sent at once when the page is hidden
+  // (tab switch, app switch on a phone, refresh, close) and when this student's data is swapped out.
+  useEffect(() => {
+    const s = createDebouncedSaver((value) => store.set(`u:${user}:study`, value, true)
+      .then((ok) => { if (savedCb.current) savedCb.current(ok); })
+      .catch(() => { if (savedCb.current) savedCb.current(false); }), 700);
+    saver.current = s;
+    const onHide = () => { if (document.visibilityState === "hidden") s.flush(); };
+    const onLeave = () => { s.flush(); };
+    document.addEventListener("visibilitychange", onHide);
+    window.addEventListener("pagehide", onLeave);
+    return () => {
+      document.removeEventListener("visibilitychange", onHide);
+      window.removeEventListener("pagehide", onLeave);
+      s.flush();
+      saver.current = null;
+    };
+  }, [user]);
   const update = useCallback((fn) => {
     const next = fn(ref.current || { cards: {}, log: [], plan: null });
     ref.current = next; setS(next);
-    clearTimeout(timer.current);
-    timer.current = setTimeout(() => store.set(`u:${user}:study`, next, true), 700);
-  }, [user]);
+    if (saver.current) saver.current.schedule(next);
+  }, []);
   return [study, update];
 }
 const missCard = (s, id) => ({ ...s, cards: { ...s.cards, [id]: { ...(s.cards[id] || { s: 0, m: 0 }), b: 1, due: todayISO(), s: ((s.cards[id] || {}).s || 0) + 1, m: ((s.cards[id] || {}).m || 0) + 1 } } });
 const logSession = (s, kind, subj, n, ok) => ({ ...s, log: [...(s.log || []).slice(-79), { at: Date.now(), kind, subj, n, ok }] });
 
 function RunShell({ title, sub, step, total, onExit, children }) {
+  const ref = useRef(null);
+  /* a study run is a work zone: navigation, header and the add button step aside until it ends */
+  useLayoutEffect(() => {
+    const root = ref.current && ref.current.closest(".hr");
+    if (!root) return undefined;
+    root.setAttribute("data-focus", "1");
+    return () => root.removeAttribute("data-focus");
+  }, []);
   return (
-    <div className="run">
+    <div className="run" ref={ref}>
       <button className="back" onClick={onExit}><ChevronLeft size={16} />Back to study</button>
       <h1 className="h1" style={{ marginBottom: 2 }}>{title}</h1>
       {sub && <p className="sub" style={{ marginBottom: 12 }}>{sub}</p>}
@@ -3927,14 +4131,14 @@ function PlanRun({ subjects, study, update, onStart, onExit }) {
 }
 
 const REC = { today: ["cards", "cloze"], week: ["teach", "quiz"], final: ["blurt", "exam"] };
-function StudyHub({ tasks, materials, subjects, kb, saveKb, user, classQuarter, scope }) {
+function StudyHub({ tasks, materials, subjects, kb, saveKb, user, classQuarter, scope, onSaved }) {
   const saved = (() => { try { return JSON.parse(localStorage.getItem("hr:study") || "{}"); } catch { return {}; } })();
   const [period, setPeriod] = useState(PERIODS.some((p) => p[0] === saved.period) ? saved.period : "week");
   const [pick, setPick] = useState(Array.isArray(saved.pick) ? saved.pick : []);
   const [focus, setFocus] = useState(null); // study just one task's notes
   useEffect(() => { try { localStorage.setItem("hr:study", JSON.stringify({ period, pick })); } catch { /* storage blocked */ } }, [period, pick]);
   useEffect(() => { if (!scope) return; setFocus(scope.taskId || null); if (scope.period) setPeriod(scope.period); if (scope.taskId) setPick([]); else if (scope.subjects) setPick(scope.subjects); }, [scope?.id]);
-  const [study, update] = useStudy(user);
+  const [study, update] = useStudy(user, onSaved);
   const [run, setRun] = useState(null);
   const [prep, setPrep] = useState("");
   const [note, setNote] = useState("");
@@ -4028,7 +4232,7 @@ function StudyHub({ tasks, materials, subjects, kb, saveKb, user, classQuarter, 
   );
 }
 
-function ReviewTab({ tasks, progress, materials, weeklies, saveWeekly, user, addMaterial, removeMaterial, focusId, clearFocus, reviewStart, clearStart, onRefresh, subjects, kb, saveKb, classQuarter }) {
+function ReviewTab({ tasks, progress, materials, weeklies, saveWeekly, user, addMaterial, removeMaterial, focusId, clearFocus, reviewStart, clearStart, onRefresh, subjects, kb, saveKb, classQuarter, onSaved }) {
   const [sel, setSel] = useState(focusId || null);
   const [all, setAll] = useState(false);
   const [section, setSection] = useState("study");
@@ -4054,7 +4258,7 @@ function ReviewTab({ tasks, progress, materials, weeklies, saveWeekly, user, add
           : "Every note, upload and reviewer your class has stored."}
       </p>
       <Segmented value={section} onChange={setSection} tour="study-sections" options={[["study", "Study"], ["tasks", "By task"], ["weekly", "Weekly"], ["library", "Library"]]} />
-      {section === "study" && <div style={{ marginTop: 18 }}><StudyHub tasks={tasks} materials={materials} subjects={subjects} kb={kb} saveKb={saveKb} user={user} classQuarter={classQuarter} scope={scope} /></div>}
+      {section === "study" && <div style={{ marginTop: 18 }}><StudyHub tasks={tasks} materials={materials} subjects={subjects} kb={kb} saveKb={saveKb} user={user} classQuarter={classQuarter} scope={scope} onSaved={onSaved} /></div>}
       {section === "weekly" && <WeeklyReviewer key={startWs || "w"} initialWs={startWs} tasks={tasks} materials={materials} weeklies={weeklies} user={user} saveWeekly={saveWeekly} kb={kb} saveKb={saveKb} onStudy={goStudy} />}
       {section === "library" && <Library tasks={tasks} materials={materials} user={user} removeMaterial={removeMaterial} kb={kb} onStudy={goStudy} />}
       {section === "tasks" && (
@@ -4125,7 +4329,7 @@ When the person asks you to add an assignment, quiz, or other task, add it. If t
         try {
           const arr = JSON.parse(tail.slice(tail.indexOf("["), tail.lastIndexOf("]") + 1));
           if (Array.isArray(arr)) actions = arr;
-        } catch {}
+        } catch (err) { console.warn("[Homeroom] non-fatal:", err); }
       }
       const added = [];
       for (const a of actions) {
@@ -4301,9 +4505,10 @@ function AdminApp({ themeAttr, accentStyle, theme, setTheme, onSignOut }) {
     <div className="hr app adminApp" data-theme={themeAttr} data-wide="1" style={accentStyle}>
       <style>{CSS}</style>
       <Backdrop />
+      <a className="skip" href="#main" onClick={(e) => { e.preventDefault(); const m = document.getElementById("main"); if (m) m.focus(); }}>Skip to content</a>
       <nav className="rail" aria-label="Admin" ref={navRef}>
         {navSlider}
-        <div className="railLogo"><span className="mark logoFull">Homeroom</span><span className="mark logoMini">H</span></div>
+        <div className="railLogo" data-rv="logo"><span className="mark logoFull">Homeroom</span><span className="mark logoMini">H</span></div>
         {tabs.map(([k, l, Icon]) => (
           <button key={k} className="nav" aria-current={tab === k ? "page" : undefined} onClick={() => go(k)}>
             <Icon size={21} /><span>{l}</span>
@@ -4323,7 +4528,7 @@ function AdminApp({ themeAttr, accentStyle, theme, setTheme, onSignOut }) {
             <button className="hdrBtn phoneOnly" aria-label="Sign out" onClick={onSignOut}><LogOut size={17} /></button>
           </div>
         </header>
-        <div className="page" key={tab}>
+        <div className="page" key={tab} data-rv={tab === "tasks" ? undefined : `p-${tab}`} role="main" id="main" tabIndex={-1}>
           <div className="scroll">
             {tab === "suggestions" && (
               <>
@@ -4430,7 +4635,7 @@ function AdminApp({ themeAttr, accentStyle, theme, setTheme, onSignOut }) {
 /* ───────────────────────── layout helpers, focus timer, side panel ───────────────────────── */
 
 const ACCENTS = {
-  clay: ["#C4623F", "#E08A66"],
+  clay: ["#D97757", "#E08A66"],
   ocean: ["#3F7CAC", "#6BA3D1"],
   forest: ["#4A8A66", "#7DB894"],
   plum: ["#8A5A83", "#B98BB1"],
@@ -4506,7 +4711,8 @@ function useFocusTimer() {
     return () => clearInterval(id);
   }, [running]);
   useEffect(() => {
-    document.title = running ? `${mmss(left)} · Homeroom` : "Homeroom";
+    titleTimer = running ? mmss(left) : "";
+    applyTitle();
   }, [running, left]);
   const start = () => { endRef.current = Date.now() + left * 1000; setRunning(true); Sound.play("tap"); };
   const pause = () => setRunning(false);
@@ -4661,7 +4867,7 @@ function ProofPanel({ task, existing, userId, classId, onSubmit }) {
       await onSubmit(paths);
     } catch (e) {
       console.error("proof upload failed", e);
-      setErr("The upload didn't go through. Check your connection and try again.");
+      setErr(e.notImage ? "That file doesn't look like a photo. Choose a picture from your camera or gallery." : "The upload didn't go through. Check your connection and try again.");
       setBusy(false);
     }
   };
@@ -4817,6 +5023,7 @@ function BoardingPass({ classes, setClasses, replay, name, classLabel, onSubmit,
   const ready = replay || (nameOk && !!cls);
   const buzz = (p) => { try { navigator.vibrate && navigator.vibrate(p); } catch { /* not supported */ } };
   const today = new Date().toLocaleDateString("en-US", { month: "short", day: "numeric" });
+  const gateCode = (gate || "").replace(/[^A-Za-z0-9]/g, "").slice(0, 3).toUpperCase() || "---";
 
   const stamp = async () => {
     if (!ready || busy || phase !== "fill") return;
@@ -4854,7 +5061,8 @@ function BoardingPass({ classes, setClasses, replay, name, classLabel, onSubmit,
         </p>
         <div className="bpTicket" data-phase={phase}>
           <div className="bpBody" style={phase === "tearing" ? { clipPath: TEAR } : undefined}>
-            <div className="bpHead"><span>Boarding pass</span><span>Homeroom Air</span></div>
+            <div className="bpHead"><span>Boarding pass</span><span className="bpAir"><Plane size={14} aria-hidden="true" />Homeroom Air</span></div>
+            <div className="bpRoute" aria-hidden="true"><b>HRM</b><span><Plane size={16} /></span><b>{gateCode}</b></div>
             <label className="bpLab" htmlFor="bpn">Passenger</label>
             <input id="bpn" className="bpName" value={uname} placeholder="your name" maxLength={20}
               readOnly={replay || phase !== "fill"} autoCapitalize="none" autoCorrect="off" autoComplete="off" spellCheck={false}
@@ -5031,6 +5239,8 @@ function Cabin({ me, cabin, tasks, completions, groups, subjects, onChat, inShee
   const who = pick && names.includes(pick) ? pick : me;
   const whoSt = weekStatus(who, tasks, completions);
   const whoShared = shared[who];
+  const whoIdx = names.indexOf(who);
+  const seatNo = whoIdx >= 0 ? `${Math.floor(whoIdx / perRow) + 1}${letters[whoIdx % perRow]}` : "";
 
   const seat = (n) => {
     const on = isOn(n);
@@ -5100,6 +5310,9 @@ function Cabin({ me, cabin, tasks, completions, groups, subjects, onChat, inShee
       <div className="cabinLegend" aria-hidden="true">
         {Object.entries({ complete: "Complete", almost: "Almost", starting: "Starting", nothing: "Nothing" }).map(([k, l]) => <span key={k} data-st={k}><i />{l}</span>)}
       </div>
+      <div className="plane">
+        <i className="wing l" aria-hidden="true" />
+        <i className="wing r" aria-hidden="true" />
       <div className="fuselage" role="group" aria-label="Seat map of your class">
         <div className="nose" aria-hidden="true"><i /></div>
         <div className="letters" aria-hidden="true">
@@ -5108,8 +5321,9 @@ function Cabin({ me, cabin, tasks, completions, groups, subjects, onChat, inShee
         {rowEls}
         <div className="tail" aria-hidden="true" />
       </div>
+      </div>
       <div className="cabinCard" key={who}>
-        <div className="cabinWho"><b>{who}</b>{who === me && <small>you</small>}</div>
+        <div className="cabinWho"><b>{who}</b><small>{who === me ? "You, seat " : "Seat "}{seatNo}</small></div>
         <div className="cabinChips">
           <span className="cChip" data-on={isOn(who) ? 1 : 0}><i />{isOn(who) ? "Online" : "Offline"}</span>
           <span className="cChip" data-st={whoSt.key}><i />{WEEK_LABEL[whoSt.key]}</span>
@@ -5224,11 +5438,9 @@ export default function App() {
   const [welcome, setWelcome] = useState(false); // replay of the boarding pass from the account menu
   const [needPass, setNeedPass] = useState(false); // signed in, but the boarding pass hasn't been filled out yet
   const [curtain, setCurtain] = useState(null); // null, wait, fly: the plane crossing the screen
-  const [invite, setInvite] = useState(false); // offer the hands-on tour once, right after the first flight
   const [chat, setChat] = useState(null); // classmate we're chatting with
   const [cabinOpen, setCabinOpen] = useState(false);
   const threads = useRef({});
-  const firstFlight = useRef(false);
   const [delOpen, setDelOpen] = useState(false);
   const [recovering, setRecovering] = useState(() => /type=recovery/.test(window.location.hash));
   useEffect(() => {
@@ -5267,8 +5479,11 @@ export default function App() {
   const [fbOpen, setFbOpen] = useState(false);
   const [planOpen, setPlanOpen] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
+  const [helpOpen, setHelpOpen] = useState(false);
+  const gKey = useRef(0);
   const [toast, setToast] = useState(null);
   const [tour, setTour] = useState(false); // the hands-on welcome tour
+  const [unbox, setUnbox] = useState(null); // null: the app is out of the box. A list: still wrapped, these pieces are unpacked so far
   const [demo, setDemo] = useState("todo"); // status of the practice task (lives only in the tour)
   const tourUi = useRef(null); // the person's own list settings, put back when the tour ends
   const [theme, setTheme] = useState("auto");
@@ -5276,6 +5491,17 @@ export default function App() {
   const [sysDark, setSysDark] = useState(() => (window.matchMedia ? window.matchMedia("(prefers-color-scheme: dark)").matches : false));
   const [isAdmin, setIsAdmin] = useState(false);
   const dark = theme === "dark" || (theme === "auto" && sysDark);
+  // The page title follows the active tab, which helps with browser history and several open tabs.
+  useEffect(() => {
+    const names = { tasks: "Tasks", done: "Done", review: "Review", ask: "Ask" };
+    titleBase = user && names[tab] ? `${names[tab]} · Homeroom` : "Homeroom";
+    applyTitle();
+  }, [tab, user]);
+  // Keep the browser chrome (status bar, address bar) in step with the app theme.
+  useEffect(() => {
+    const m = document.querySelector('meta[name="theme-color"]');
+    if (m) m.setAttribute("content", dark ? "#1A1714" : "#FAF9F5");
+  }, [dark]);
   const progressRef = useRef(progress); progressRef.current = progress;
   const tasksRef = useRef(tasks); tasksRef.current = tasks;
   const lastSync = useRef(0);
@@ -5310,6 +5536,33 @@ export default function App() {
       const typing = tag === "input" || tag === "textarea" || tag === "select" || e.target.isContentEditable;
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k") { e.preventDefault(); setSearchOpen(true); return; }
       if (typing || e.ctrlKey || e.metaKey || e.altKey) return;
+      // While a sheet is showing, plain-key shortcuts stay quiet so focus can't leak to the page behind it.
+      if (document.querySelector('.overlay[data-show="1"]')) return;
+      if (e.key === "?") { e.preventDefault(); setHelpOpen(true); return; }
+      // "g" then a letter jumps between tabs, like in GitHub or Gmail.
+      if (gKey.current && Date.now() - gKey.current < 1200) {
+        gKey.current = 0;
+        const dest = { t: "tasks", d: "done", r: "review", a: "ask" }[e.key.toLowerCase()];
+        if (dest) { e.preventDefault(); Sound.play("tap"); setTab(dest); return; }
+      }
+      if (e.key === "g" || e.key === "G") { gKey.current = Date.now(); return; }
+      // "j" / "k" move through the visible rows.
+      if (e.key === "j" || e.key === "k") {
+        const rows = [...document.querySelectorAll(".hr .row")];
+        if (!rows.length) return;
+        e.preventDefault();
+        const at = rows.indexOf(document.activeElement);
+        const next = rows[Math.max(0, Math.min(rows.length - 1, at < 0 ? 0 : at + (e.key === "j" ? 1 : -1)))];
+        next.focus({ preventScroll: false });
+        next.scrollIntoView({ block: "nearest" });
+        return;
+      }
+      // "x" ticks the focused task, using the same button a tap would.
+      if (e.key === "x" || e.key === "X") {
+        const row = document.activeElement && document.activeElement.closest ? document.activeElement.closest(".row") : null;
+        const tick = row && row.querySelector(".check");
+        if (tick) { e.preventDefault(); tick.click(); return; }
+      }
       if (e.key === "/") { e.preventDefault(); setSearchOpen(true); }
       else if (e.key === "n" || e.key === "N") { e.preventDefault(); setForm({ mode: "add" }); }
     };
@@ -5435,10 +5688,49 @@ export default function App() {
 
   /* ----- toast ----- */
 
-  const showToast = (msg, undo, label) => {
+  // Destructive undos get the long window; routine confirmations leave sooner.
+  const showToast = (msg, undo, label, ms) => {
+    const dur = ms || (undo ? 5200 : 3400);
     clearTimeout(toastTimer.current);
-    setToast({ msg, undo, label, id: uid() });
-    toastTimer.current = setTimeout(() => setToast(null), 5200);
+    setToast({ msg, undo, label, id: uid(), ms: dur });
+    toastTimer.current = setTimeout(() => setToast(null), dur);
+  };
+  // Hovering or focusing the toast holds it, so the Undo button never leaves mid-click.
+  const holdToast = () => clearTimeout(toastTimer.current);
+  const releaseToast = () => {
+    clearTimeout(toastTimer.current);
+    toastTimer.current = setTimeout(() => setToast(null), 2200);
+  };
+  // Say so, calmly, when the connection drops or comes back.
+  useEffect(() => {
+    const off = () => showToast("You're offline. Changes may not save until you're back.", null, null, 5200);
+    const on = () => showToast("Back online.", null, null, 2600);
+    window.addEventListener("offline", off);
+    window.addEventListener("online", on);
+    return () => { window.removeEventListener("offline", off); window.removeEventListener("online", on); };
+  }, []);
+
+  /* ----- export: a plain JSON copy of the person's own statuses and notes ----- */
+  const exportMyData = () => {
+    try {
+      const data = {
+        app: "homeroom", schema: 1, exportedAt: new Date().toISOString(), user, class: classLabel,
+        tasks: tasks.map((t) => ({
+          title: t.title, subject: t.subject, type: t.type, priority: t.priority, quarter: t.quarter || null,
+          deadline: t.deadline, notes: t.notes || "", myStatus: progress[t.id] || "todo",
+        })),
+        myNotes: materials.filter((m) => m.by === user).map((m) => ({ title: m.title, taskId: m.taskId, text: m.text || "" })),
+      };
+      const url = URL.createObjectURL(new Blob([JSON.stringify(data, null, 2)], { type: "application/json" }));
+      const a = document.createElement("a");
+      a.href = url; a.download = `homeroom-${toISO(new Date())}.json`;
+      document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+      showToast("Saved a copy of your tasks and notes");
+    } catch (err) {
+      console.warn("[Homeroom] export failed:", err);
+      showToast("Couldn't save a copy just now. Try again in a moment.");
+    }
   };
 
   /* ----- auth ----- */
@@ -5474,13 +5766,13 @@ export default function App() {
     return "Couldn't save your pass: " + error.message;
   };
   const takeoff = async (u, cid) => {
-    firstFlight.current = true;
+    setUnbox([]); // the app starts out wrapped, so the plane lands on an empty box
     setNeedPass(false); setCurtain("wait");
     await onAuthed(u, cid, false, true);
     setCurtain("fly");
   };
-  const replayTakeoff = () => { setWelcome(false); setCurtain("fly"); };
-  const landed = () => { setCurtain(null); if (firstFlight.current) { firstFlight.current = false; setInvite(true); } };
+  const replayTakeoff = () => { setUnbox([]); setWelcome(false); setCurtain("fly"); };
+  const landed = () => { setCurtain(null); setTour(true); }; // the plane lands, and the tour starts unpacking
   const openChat = (n) => { cabin.clearUnread(n); setChat(n); setCabinOpen(false); };
   const joinGroup = (id, join) => mutate("groups", setGroups, (c) => c.map((x) => {
     if (x.id !== id) return x;
@@ -5500,12 +5792,12 @@ export default function App() {
     showToast(`${from} wants to chat`, () => openChat(from), "Open");
   }, [cabin.lastRing]);
   const afterDelete = () => {
-    try { Object.keys(localStorage).filter((k) => k.startsWith(LS) && k.includes(`:${user}`)).forEach((k) => localStorage.removeItem(k)); sessionStorage.setItem("hr:notice", "Your account has been deleted."); } catch {}
+    try { Object.keys(localStorage).filter((k) => k.startsWith(LS) && k.includes(`:${user}`)).forEach((k) => localStorage.removeItem(k)); sessionStorage.setItem("hr:notice", "Your account has been deleted."); } catch (err) { console.warn("[Homeroom] non-fatal:", err); }
     supabase.auth.signOut().catch(() => {});
     setDelOpen(false); signOut();
   };
   const finishTour = async () => {
-    setTour(false); setDemo("todo");
+    setTour(false); setUnbox(null); setDemo("todo");
     setDetailId(null); setForm(null); setSearchOpen(false);
     if (tourUi.current) { setUi(tourUi.current); tourUi.current = null; }
     if (user) await store.set(`intro:${user}`, true);
@@ -5523,9 +5815,10 @@ export default function App() {
   };
 
   const signOut = async () => {
+    clearDraft();
     await supabase.auth.signOut(); setIsAdmin(false);
     Sound.stopMusic();
-    setUser(null); setMenu(false); setTab("tasks"); setTour(false);
+    setUser(null); setMenu(false); setTab("tasks"); setTour(false); setUnbox(null);
     setTasks([]); setMaterials([]); setComments([]); setCompletions({}); setAnnouncements([]); setWeeklies([]); setProofs({}); setGroups([]); setSubjectDefs([]); setKb({});
     backfilled.current = false;
   };
@@ -5645,14 +5938,14 @@ export default function App() {
     setProgress(next);
     Sound.play(s === "done" ? "done" : s === "progress" ? "pop" : "undo");
     if (s === "done" && navigator.vibrate) navigator.vibrate([8, 50, 16]);
-    store.set(`u:${user}:progress`, next, true);
+    store.set(`u:${user}:progress`, next, true).then((ok) => setSyncErr(!ok)).catch(() => setSyncErr(true));
     if (s === "done" || prev === "done") markCompletion(id, s === "done");
     if (s === "done") logActivity();
     if (s === "done") {
       const today = tasksRef.current.filter((t) => t.deadline === todayISO());
       const clear = today.length > 1 && today.every((t) => next[t.id] === "done");
       if (clear) setTimeout(() => Sound.play("schoolbell"), 450);
-      showToast(clear ? "That's everything due today. School's out!" : "Marked done", () => setStatus(id, prev));
+      showToast(clear ? "That's everything due today. School's out!" : "Marked done", () => setStatus(id, prev), "Undo", clear ? 5200 : 3600);
     }
   };
 
@@ -5745,7 +6038,7 @@ export default function App() {
 
   const detailBody = detail && (
           <div>
-            <h3 className="serif" style={{ fontSize: 26, fontWeight: 400, margin: "0 0 8px", lineHeight: 1.2 }}>{detail.title}</h3>
+            <h3 className="serif" style={{ fontSize: 28, fontWeight: 400, margin: "0 0 8px", lineHeight: 1.2 }}>{detail.title}</h3>
             <div className="rowMeta" style={{ fontSize: 14 }}>
               <span><span className="dot" style={{ background: subjColor(detail.subject) }} />{detail.subject}</span>
               <span>{detail.type}</span>
@@ -5803,21 +6096,22 @@ export default function App() {
   );
 
   return (
-    <div className={swap ? "hr app swap" : "hr app"} data-theme={themeAttr} data-wide={tab === "tasks" && ui.mode === "board" && !detail ? 1 : 0} style={accentStyle}>
+    <div className={swap ? "hr app swap" : "hr app"} data-unbox={unbox ? unbox.join(" ") : undefined} data-theme={themeAttr} data-wide={tab === "tasks" && ui.mode === "board" && !detail ? 1 : 0} style={accentStyle}>
       <style>{CSS}</style>
       <Backdrop />
       {syncing && <div className="sync" aria-hidden="true" />}
+      <a className="skip" href="#main" onClick={(e) => { e.preventDefault(); const m = document.getElementById("main"); if (m) m.focus(); }}>Skip to content</a>
       <nav className="rail" aria-label="Main" ref={navRef}>
         {navSlider}
-        <div className="railLogo"><span className="mark logoFull">Homeroom</span><span className="mark logoMini">H</span></div>
+        <div className="railLogo" data-rv="logo"><span className="mark logoFull">Homeroom</span><span className="mark logoMini">H</span></div>
         {tabs.map(([k, l, Icon]) => (
-          <button key={k} className="nav" data-tour={`tab-${k}`} aria-current={tab === k ? "page" : undefined} onClick={() => { if (tab !== k) Sound.play("tap"); setTab(k); }}>
+          <button key={k} className="nav" data-rv={`t-${k}`} data-tour={`tab-${k}`} aria-current={tab === k ? "page" : undefined} onClick={() => { if (tab !== k) Sound.play("tap"); setTab(k); }}>
             <Icon size={21} /><span>{l}</span>
           </button>
         ))}
         <div className="railSpacer" />
-        <div className="railCabin" data-tour="cabin"><Cabin me={user} cabin={cabin} tasks={tasks} completions={completions} groups={groups} subjects={subjects} onChat={openChat} /></div>
-        <button className="nav acct" onClick={() => { Sound.play("tap"); setMenu(true); }} aria-label="Account">
+        <div className="railCabin" data-rv="cabin" data-tour="cabin"><Cabin me={user} cabin={cabin} tasks={tasks} completions={completions} groups={groups} subjects={subjects} onChat={openChat} /></div>
+        <button className="nav acct" data-rv="acct" data-tour="acct" onClick={() => { Sound.play("tap"); setMenu(true); }} aria-label="Account">
           <span className="avatar">{user[0].toUpperCase()}</span><span>{user}</span>
         </button>
       </nav>
@@ -5825,22 +6119,23 @@ export default function App() {
         <header className="head">
           <span className="headL">
             <span className="mark phoneOnly">Homeroom</span>
-            {classLabel && <span className="classChip">{classLabel}<i>Q{classQuarter}</i></span>}
+            {classLabel && <span className="classChip" data-rv="chip">{classLabel}<i>Q{classQuarter}</i></span>}
           </span>
           <div className="hdrRight">
-            <button className="searchPill" data-tour="search" onClick={() => { Sound.play("tap"); setSearchOpen(true); }}>
+            <button className="searchPill" data-rv="search" data-tour="search" onClick={() => { Sound.play("tap"); setSearchOpen(true); }}>
               <Search size={16} /><span>Search tasks and notes</span><kbd className="kbd">Ctrl K</kbd>
             </button>
-            <button className="hdrBtn searchBtn" data-tour="search" aria-label="Search" onClick={() => { Sound.play("tap"); setSearchOpen(true); }}><Search size={17} /></button>
-            <button className="hdrBtn noDesk cabinBtn" data-tour="cabin-btn" aria-label="Your class, seat map" data-ping={Object.keys(cabin.unread).length ? 1 : 0} onClick={() => { Sound.play("tap"); setCabinOpen(true); }}><Plane size={17} /></button>
-            <button className="hdrBtn" aria-label={audio.music ? "Turn music off" : "Turn music on"} aria-pressed={audio.music}
+            <button className="hdrBtn searchBtn" data-rv="search" data-tour="search" aria-label="Search" onClick={() => { Sound.play("tap"); setSearchOpen(true); }}><Search size={17} /></button>
+            <button className="hdrBtn noDesk cabinBtn" data-rv="cabin" data-tour="cabin-btn" aria-label="Your class, seat map" data-ping={Object.keys(cabin.unread).length ? 1 : 0} onClick={() => { Sound.play("tap"); setCabinOpen(true); }}><Plane size={17} /></button>
+            <button className="hdrBtn" data-rv="music" aria-label={audio.music ? "Turn music off" : "Turn music on"} aria-pressed={audio.music}
               style={audio.music ? { color: "var(--accent)", borderColor: "var(--accent)" } : undefined} onClick={toggleMusic}><Music size={17} /></button>
-            <button className="btn accent small newBtn" data-tour="new-task" onClick={() => { Sound.play("tap"); setForm({ mode: "add" }); }}><Plus size={16} />New task</button>
-            <button className="avatar phoneOnly" onClick={() => { Sound.play("tap"); setMenu(true); }} aria-label="Account">{user[0].toUpperCase()}</button>
+            <button className="btn accent small newBtn" data-rv="new" data-tour="new-task" onClick={() => { Sound.play("tap"); setForm({ mode: "add" }); }}><Plus size={16} />New task</button>
+            <button className="avatar phoneOnly" data-rv="acct" data-tour="acct" onClick={() => { Sound.play("tap"); setMenu(true); }} aria-label="Account">{user[0].toUpperCase()}</button>
           </div>
         </header>
         {syncErr && <div style={{ background: "var(--errbg)", color: C.danger, fontSize: 13, padding: "8px 20px" }}>Your last change may not have saved. Check your connection.</div>}
-        <div className="page" key={tab}>
+        <div className="page" key={tab} data-rv={tab === "tasks" ? undefined : `p-${tab}`} role="main" id="main" tabIndex={-1}>
+          <ErrorBoundary inline resetKey={tab}>
           {tab === "tasks" && (
             <TasksTab user={user} tasks={viewTasks} progress={viewProgress} completions={completions}
               announcements={announcements.filter((a) => !dismissedAnn.includes(a.id))} dismissAnn={dismissAnn}
@@ -5849,7 +6144,7 @@ export default function App() {
               bp={bp} selectedId={detailId} streak={streak} openFocus={() => setFocusOpen(true)}
               openTask={(id) => { setDetailId(id); setConfirmDel(false); }}
               editTask={(id) => { const t = tasks.find((x) => x.id === id); if (t) setForm({ mode: "edit", task: t }); }}
-              ui={ui} setUi={setUi} loading={syncing} onRefresh={() => refresh(true)} onPlan={() => setPlanOpen(true)} />
+              ui={ui} setUi={setUi} loading={syncing} onRefresh={() => refresh(true)} onPlan={() => setPlanOpen(true)} onNew={() => { Sound.play("tap"); setForm({ mode: "add" }); }} />
           )}
           {tab === "done" && (
             <DoneTab tasks={tasks} progress={progress} completions={completions} user={user} quarter={classQuarter} setStatus={requestStatus}
@@ -5859,30 +6154,32 @@ export default function App() {
           )}
           {tab === "review" && (
             <ReviewTab tasks={tasks} progress={progress} materials={materials} weeklies={weeklies} saveWeekly={saveWeekly} reviewStart={reviewStart} clearStart={() => setReviewStart(null)} user={user} addMaterial={addMaterial}
-              removeMaterial={removeMaterial} focusId={reviewFocus} clearFocus={() => setReviewFocus(null)} onRefresh={() => refresh(true)} subjects={subjects} kb={kb} saveKb={saveKb} classQuarter={classQuarter} />
+              removeMaterial={removeMaterial} focusId={reviewFocus} clearFocus={() => setReviewFocus(null)} onRefresh={() => refresh(true)} subjects={subjects} kb={kb} saveKb={saveKb} classQuarter={classQuarter}
+              onSaved={(ok) => setSyncErr(!ok)} />
           )}
           {tab === "ask" && <AskTab user={user} tasks={tasks} materials={materials} progress={progress} kb={kb} addTask={(t) => { Sound.play("add"); addTask({ quarter: defQuarter, ...t }); }} />}
+          </ErrorBoundary>
         </div>
         {tab === "tasks" && (
-          <button className="fab" data-tour="new-task" aria-label="Add a task" onClick={() => { Sound.play("tap"); setForm({ mode: "add" }); }}><Plus size={26} /></button>
+          <button className="fab" data-rv="new" data-tour="new-task" aria-label="Add a task" onClick={() => { Sound.play("tap"); setForm({ mode: "add" }); }}><Plus size={26} /></button>
         )}
         {toast && (
-          <div className="toast" role="status" key={toast.id}>
+          <div className="toast" role="status" key={toast.id} onMouseEnter={holdToast} onMouseLeave={releaseToast} onFocus={holdToast} onBlur={releaseToast}>
             <span>{toast.msg}</span>
             {toast.undo && <button onClick={() => { const u = toast.undo; setToast(null); u(); }}>{toast.label || "Undo"}</button>}
-            {toast.undo && <i className="toastBar" aria-hidden="true" />}
+            {toast.undo && <i className="toastBar" aria-hidden="true" style={{ animationDuration: `${toast.ms}ms` }} />}
           </div>
         )}
         <nav className="tabs" aria-label="Main" ref={tabsRef}>
           {tabsSlider}
           {tabs.map(([k, l, Icon]) => (
-            <button key={k} className="tab" data-tour={`tab-${k}`} aria-current={tab === k ? "page" : undefined} onClick={() => { if (tab !== k) Sound.play("tap"); setTab(k); }}>
+            <button key={k} className="tab" data-rv={`t-${k}`} data-tour={`tab-${k}`} aria-current={tab === k ? "page" : undefined} onClick={() => { if (tab !== k) Sound.play("tap"); setTab(k); }}>
               <Icon size={21} />{l}
             </button>
           ))}
         </nav>
       </div>
-      <aside className="side" aria-label="Details">
+      <aside className="side" data-rv="side" aria-label="Details">
         {detail ? (
           <div className="inspector" key={detail.id}>
             <div className="inspHead">
@@ -5934,6 +6231,9 @@ export default function App() {
       </Sheet>
       <Sheet open={groupsOpen} onClose={() => setGroupsOpen(false)} title="Groups">
         {groupsOpen && <GroupsPanel groups={groups} tasks={tasks} progress={progress} subjects={subjects} defQuarter={defQuarter} onSave={saveGroup} onDelete={deleteGroup} user={user} onJoin={joinGroup} onAddSubject={setSubject} />}
+      </Sheet>
+      <Sheet open={helpOpen} onClose={() => setHelpOpen(false)} title="Keyboard shortcuts">
+        {helpOpen && <ShortcutList />}
       </Sheet>
       <Sheet open={planOpen} onClose={() => setPlanOpen(false)} title="Plan my evening">
         {planOpen && <PlanPanel tasks={tasks} progress={progress} />}
@@ -5988,8 +6288,12 @@ export default function App() {
         <button className="btn ghost full" style={{ marginBottom: 10 }} onClick={() => { setMenu(false); setFbOpen(true); }}>
           Send a suggestion or report a problem
         </button>
+        <button className="btn ghost full" style={{ marginBottom: 10 }} onClick={exportMyData}>
+          Download a copy of my data
+        </button>
         <button className="btn ghost full" onClick={signOut}>Sign out</button>
         <button className="btn ghost full" style={{ marginTop: 10, color: "var(--danger)" }} onClick={() => { setMenu(false); setDelOpen(true); }}>Delete account</button>
+        <p className="acctSign">Homeroom · made by <b>Nathan</b> Visaya</p>
       </Sheet>
       {MINECRAFT.on && (
         <Sheet open={mcOpen} onClose={() => setMcOpen(false)} title="Minecraft server">
@@ -6007,20 +6311,13 @@ export default function App() {
       </Sheet>
       {welcome && <BoardingPass replay name={user} classLabel={classLabel} onTakeoff={replayTakeoff} onSkip={() => setWelcome(false)} />}
       {curtain && <PlaneCurtain go={curtain === "fly"} onDone={landed} />}
-      {invite && !tour && !curtain && (
-        <div className="invite" role="status">
-          <div><b>Want a one-minute tour?</b><small>You'll tap through the real app.</small></div>
-          <button className="btn accent small" onClick={() => { Sound.play("pop"); setInvite(false); setTour(true); }}>Take the tour</button>
-          <button className="iconBtn" aria-label="Not now" onClick={() => setInvite(false)}><X size={16} /></button>
-        </div>
-      )}
       <Sheet open={!!chat} onClose={() => setChat(null)} title="Chat">
         {chat && <ChatSheet key={chat} peer={chat} me={user} classId={classId} thread={threads.current[chat]} saveThread={(p, m) => { threads.current[p] = m; }} ring={cabin.ring} peerOnline={cabin.online.has(chat)} />}
       </Sheet>
       <Sheet open={cabinOpen && bp !== "desktop"} onClose={() => setCabinOpen(false)} title="Your class">
         <Cabin inSheet me={user} cabin={cabin} tasks={tasks} completions={completions} groups={groups} subjects={subjects} onChat={openChat} />
       </Sheet>
-      {tour && <Tour user={user} bp={bp} ctx={tourCtx} go={tourGo} onDone={finishTour} />}
+      {tour && <Tour user={user} bp={bp} ctx={tourCtx} go={tourGo} onDone={finishTour} onReveal={setUnbox} />}
     </div>
   );
 }

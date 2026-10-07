@@ -37,6 +37,8 @@ To try the study assistant locally, make `.dev.vars` with `GEMINI_API_KEY=...` a
 
 Get the AI keys at aistudio.google.com and console.groq.com/keys. Never put them in `src/`.
 
+**Rate limit.** `wrangler.jsonc` gives each signed-in student 20 study-assistant calls per minute (the `AI_LIMITER` binding). It is per student, not per IP, and approximate, so it protects the class's free quota from a runaway loop rather than from a determined attacker. To change it, edit `limit` (period can only be 10 or 60). If the binding is missing, the proxy simply doesn't limit. Run the tests with `npm test`.
+
 ## What's in v8 and v9
 
 **Sign-up and the boarding pass.** Creating an account asks only for an email and a password. The first time someone signs in they fill out a boarding pass (username and class), it gets stamped, they tear off the stub, a plane crosses the screen, and they're in. Anyone whose profile has no username yet (for example someone who closed the tab halfway) gets the pass again next time. The pass can be replayed from the account menu.
@@ -55,5 +57,38 @@ How the reviewers avoid missing things: each note is first turned into an invent
 
 **Minecraft.** Built but switched off. See `minecraft/README.md`.
 
-## Welcome tour
-New accounts get a hands-on tour right after the plane lands (it is offered, not forced). It lights up the real buttons and waits for the student to use them: tick a practice task, open it, set its progress, add a task, switch views, open Done, Review and Study, look at the class plane, and search. The practice task is never saved. Replay it any time from the account menu, and Esc ends it. **When you add a feature, add a step to `tourSteps` in `src/App.jsx` so new students see it.**
+## Keyboard shortcuts
+
+Press `?` anywhere in the app to see this list.
+
+| Keys | What it does |
+| --- | --- |
+| `Ctrl` / `Cmd` + `K`, or `/` | Search |
+| `n` | Add a task |
+| `g` then `t`, `d`, `r` or `a` | Go to Tasks, Done, Review or Ask |
+| `j` / `k` | Move to the next or previous task in the list |
+| `Enter` or `Space` | Open the focused task |
+| `x` | Mark the focused task done |
+| `Esc` | Close the open sheet, or end the tour |
+
+Plain-key shortcuts pause while a sheet is open and while the tour is running. Sheets keep keyboard focus inside themselves and give it back to the button that opened them. A "Skip to content" link appears for keyboard users on first Tab.
+
+## Behaviour worth knowing
+
+- **Draft task:** a half-written new task is kept in this browser and restored next time the form opens (with a "Start fresh" option). It is cleared on save and on sign-out, and it is never sent to Supabase.
+- **Errors:** a crash inside one tab shows a small "Try again" card for that tab only. A crash anywhere else shows a full-screen fallback with "Try again" and "Reload" buttons (`src/ErrorBoundary.jsx`).
+- **Saving:** study progress is saved a moment after the last answer, and immediately if the page is hidden or closed. If a save fails, a banner says the last change may not have saved.
+- **Photos:** an upload is checked by its first bytes, not by its file name, so a renamed non-image is refused.
+- **Your data:** the account menu has "Download a copy of my data" (a JSON file of your tasks, statuses and notes).
+- **Connection:** going offline or coming back online shows a short toast.
+- **Page title:** follows the active tab, with the focus-timer countdown in front while it runs.
+- **Accessibility:** respects reduced-motion and increased-contrast settings, and has a Windows high-contrast focus ring.
+- **Code layout:** shared logic lives in `src/lib/` (dates, constants, store, AI client, debounced saver) and is covered by `npm test`. Adding a colour or font size? `tests/contrast.test.mjs` and `tests/typography.test.mjs` will tell you if it drifts off the scale or fails WCAG AA.
+
+## Welcome tour (the unboxing)
+After the boarding pass and the plane, the app lands as an empty box and the tour unpacks it one piece at a time. Each step brings out one new piece of the real interface with a pop and a puff of paper scraps (with the lights up, so you see it arrive), and only then does the spotlight and the card come in. The pieces go top to bottom, so nothing already unpacked ever moves: your day and the week's ring, the three helpers, the views, the first task, the side panel, New task, then the Done, Review and Ask tabs, the class plane, search, and your account. Steps that ask you to do something (tick the practice task, open it, switch to the calendar, open a tab) wait for you, show a "Nice", pause a couple of seconds, and move on, or you can press Next. The practice task is never saved. The last step opens everything at once and carries a credit to Nathaniel Visaya ("Nathan"), who made the app on his own. Esc or the X ends the tour and unpacks everything instantly. "Play introduction" in the account menu replays the boarding pass, the plane and the tour. With reduced motion switched on, pieces simply appear.
+
+**When you add a feature, add it to the tour.** Give the piece a `data-rv="name"` attribute, add `"name"` to `UNBOX_TOKENS` in `src/App.jsx`, and list it in the `show` of the step that introduces it (`tourSteps`). `tests/unbox.test.mjs` fails if a piece is listed but never wired up. Pieces below one another must be listed top to bottom, or a blank gap will show where the later one is still wrapped.
+
+## Credits
+Homeroom was designed, written and built, start to finish, by Nathaniel Visaya ("Nathan") for his class. You'll find his name in the tour (the first card and the last), at the bottom of the account menu, in the page's metadata, and in the browser console.
