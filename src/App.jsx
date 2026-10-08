@@ -7,7 +7,13 @@ import { setAuthHeaders, callClaude, streamClaude, parseJSON } from "./lib/ai.js
 import { SUBJ, SUBJ_REG, subjColor, SWATCHES, EMAIL_RE, TYPES, REVIEW_TYPES, QUARTERS, MAX_PROOF, needsProofType, wantsProof, PRIORITIES, STATUSES, DEFAULT_SUBJECTS, statusLabel } from "./lib/constants.js";
 import { LS, createStore } from "./lib/store.js";
 import { createDebouncedSaver } from "./lib/debounce.js";
-import { useState, useEffect, useLayoutEffect, useMemo, useRef, useCallback } from "react";
+import Onboarding from "./onboarding/Onboarding.jsx";
+import PlaneFlight from "./onboarding/PlaneFlight.jsx";
+import { PHASE, EVENT, reduce as reduceOnboarding, onboardingNeeded } from "./onboarding/machine.js";
+import { readOnboardingFlag, writeOnboardingFlag } from "./onboarding/flag.js";
+import { REDESIGN_CSS } from "./design/redesign.css.js";
+import { OB_CSS } from "./onboarding/onboarding.css.js";
+import { useState, useEffect, useLayoutEffect, useMemo, useReducer, useRef, useCallback } from "react";
 import {
   Plus, Check, X, ChevronLeft, ChevronRight, ArrowUp, Upload, Sparkles, Trash2,
   BookOpen, ListChecks, MessageCircle, Pencil, ChevronDown, CalendarDays,
@@ -1513,6 +1519,7 @@ ${UNBOX_CSS}
 /* ── v12 form hint: says why Save is waiting ── */
 .formHint{margin:0 0 12px;color:var(--muted);font-size:14px}
 `;
+const STYLES = CSS + REDESIGN_CSS + OB_CSS; // the app's own styles, the redesign layer on top, then the onboarding styles
 
 /* ───────────────────────── small pieces ───────────────────────── */
 
@@ -1835,11 +1842,20 @@ const tourSteps = (bp, user) => [
   },
 ];
 
-function Tour({ user, bp, ctx, go, onDone, onReveal }) {
+function Tour({ user, bp, ctx, go, onDone, onReveal, mandatory }) {
   const steps = useMemo(() => tourSteps(bp, user), [bp, user]);
   const [i, setI] = useState(0);
   const [reached, setReached] = useState(0); // furthest step so far: going Back never re-wraps anything
   const step = steps[i];
+  // A first run can't be skipped, so a "do this" step that someone genuinely can't manage must not trap them: after 20 seconds
+  // with no progress a "Show me how" appears. Until then there is no way past.
+  const [stuck, setStuck] = useState(false);
+  useEffect(() => {
+    setStuck(false);
+    if (!mandatory || !steps[i].done) return undefined;
+    const t = setTimeout(() => setStuck(true), 20000);
+    return () => clearTimeout(t);
+  }, [i, mandatory, steps]);
   const last = steps.length - 1;
   const [rect, setRect] = useState(null);
   const [ok, setOk] = useState(false);
@@ -1954,11 +1970,11 @@ function Tour({ user, bp, ctx, go, onDone, onReveal }) {
 
   useEffect(() => {
     const onResize = () => setVp({ w: window.innerWidth, h: window.innerHeight });
-    const onKey = (e) => { if (e.key === "Escape") { e.stopImmediatePropagation(); onDone(); } };
+    const onKey = (e) => { if (e.key === "Escape") { e.stopImmediatePropagation(); if (!mandatory) onDone(); } };
     window.addEventListener("resize", onResize);
     window.addEventListener("keydown", onKey, true);
     return () => { window.removeEventListener("resize", onResize); window.removeEventListener("keydown", onKey, true); };
-  }, [onDone]);
+  }, [onDone, mandatory]);
 
   useLayoutEffect(() => {
     const h = cardRef.current ? cardRef.current.offsetHeight : 0;
@@ -2058,7 +2074,7 @@ function Tour({ user, bp, ctx, go, onDone, onReveal }) {
         <div className="tourFoot">
           {step.center ? (
             <>
-              {i === 0 ? <button className="tourLink" onClick={onDone}>Skip tour</button> : <button className="tourLink" onClick={() => { Sound.play("tap"); toStep(i - 1); }}>Back</button>}
+              {i === 0 ? (mandatory ? <span /> : <button className="tourLink" onClick={onDone}>Skip tour</button>) : <button className="tourLink" onClick={() => { Sound.play("tap"); toStep(i - 1); }}>Back</button>}
               <button className="btn accent" autoFocus onClick={() => { if (i === last) { Sound.play("tap"); onDone(); } else advance(); }}>{i === last ? "Open my list" : "Start unpacking"}</button>
             </>
           ) : (
@@ -2068,12 +2084,14 @@ function Tour({ user, bp, ctx, go, onDone, onReveal }) {
                 <i style={{ width: `${(i / (last - 1)) * 100}%` }} />
               </div>
               {interactive && !ok
-                ? <button className="tourLink" onClick={advance}>Skip step</button>
+                ? (mandatory
+                  ? (stuck ? <button className="tourLink" onClick={advance}>Show me how</button> : <span className="tourLink" style={{ visibility: "hidden" }} aria-hidden="true">Show me how</span>)
+                  : <button className="tourLink" onClick={advance}>Skip step</button>)
                 : <button className="btn accent small" onClick={advance}>Next</button>}
             </>
           )}
         </div>
-        {!step.center && <button className="tourX" onClick={onDone} aria-label="End the tour"><X size={16} /></button>}
+        {!step.center && !mandatory && <button className="tourX" onClick={onDone} aria-label="End the tour"><X size={16} /></button>}
       </div>
     </div>
   );
@@ -4503,7 +4521,7 @@ function AdminApp({ themeAttr, accentStyle, theme, setTheme, onSignOut }) {
   const dark = themeAttr === "dark";
   return (
     <div className="hr app adminApp" data-theme={themeAttr} data-wide="1" style={accentStyle}>
-      <style>{CSS}</style>
+      <style>{STYLES}</style>
       <Backdrop />
       <a className="skip" href="#main" onClick={(e) => { e.preventDefault(); const m = document.getElementById("main"); if (m) m.focus(); }}>Skip to content</a>
       <nav className="rail" aria-label="Admin" ref={navRef}>
@@ -5000,147 +5018,6 @@ function Registered({ onGo }) {
    then a plane crosses the screen and the interface is underneath. */
 
 // A zigzag edge, for the side of the pass that gets torn.
-const TEAR = `polygon(0 0,100% 0,${Array.from({ length: 13 }, (_, i) => `${i % 2 ? 100 : 96.5}% ${((i + 1) * 100) / 14}%`).join(",")},100% 100%,0 100%)`;
-
-function BoardingPass({ classes, setClasses, replay, name, classLabel, onSubmit, onTakeoff, onSignOut, onSkip }) {
-  const [uname, setUname] = useState(replay ? name : "");
-  const [cls, setCls] = useState(null);
-  const [phase, setPhase] = useState("fill"); // fill, stamping, stamped, tearing
-  const [err, setErr] = useState("");
-  const [busy, setBusy] = useState(false);
-  const timers = useRef([]);
-  const later = (fn, ms) => { timers.current.push(setTimeout(fn, ms)); };
-  useEffect(() => () => timers.current.forEach(clearTimeout), []);
-  useEffect(() => {
-    if (!replay) return undefined;
-    const k = (e) => { if (e.key === "Escape" && phase === "fill") onSkip(); };
-    window.addEventListener("keydown", k);
-    return () => window.removeEventListener("keydown", k);
-  }, [replay, phase, onSkip]);
-  const u = uname.trim().toLowerCase();
-  const nameOk = /^[a-z0-9_.]{3,20}$/.test(u);
-  const gate = replay ? classLabel : classes.find((c) => c.id === cls)?.label;
-  const ready = replay || (nameOk && !!cls);
-  const buzz = (p) => { try { navigator.vibrate && navigator.vibrate(p); } catch { /* not supported */ } };
-  const today = new Date().toLocaleDateString("en-US", { month: "short", day: "numeric" });
-  const gateCode = (gate || "").replace(/[^A-Za-z0-9]/g, "").slice(0, 3).toUpperCase() || "---";
-
-  const stamp = async () => {
-    if (!ready || busy || phase !== "fill") return;
-    setErr("");
-    if (!replay) {
-      setBusy(true);
-      const e = await onSubmit(u, cls);
-      setBusy(false);
-      if (e) { setErr(e); Sound.play("err"); return; }
-    }
-    setPhase("stamping"); Sound.play("stamp"); buzz([14, 30, 10]);
-    later(() => setPhase("stamped"), 950);
-  };
-  const tear = () => {
-    if (phase !== "stamped") return;
-    setPhase("tearing"); buzz(30);
-    Sound.play("rip"); later(() => Sound.play("rip"), 80); later(() => Sound.play("rip"), 170);
-    later(() => Sound.play("whoosh"), 800);
-    later(() => onTakeoff(u, cls), 1550);
-  };
-
-  return (
-    <div className={replay ? "bp over" : "bp"} data-phase={phase} role={replay ? "dialog" : undefined} aria-modal={replay ? "true" : undefined} aria-label="Boarding pass">
-      <div className="bpTop">
-        <span className="mark">Homeroom</span>
-        {phase === "fill" && (replay
-          ? <button className="bpLink" onClick={onSkip}>Skip</button>
-          : <button className="bpLink" onClick={onSignOut}>Sign out</button>)}
-      </div>
-      <div className="bpMain">
-        <h1 className="bpH">{phase === "fill" ? (replay ? "Your boarding pass" : "Fill out your boarding pass") : phase === "stamping" || phase === "stamped" ? "You're checked in." : "Safe travels."}</h1>
-        <p className="bpSub">
-          {phase === "fill" ? (replay ? "Here's the pass you filled out on your first day." : "Choose the name your class will see, pick your class, then get it stamped.")
-            : phase === "stamped" ? "Tear along the dotted line to board." : phase === "stamping" ? "One moment." : "Boarding now."}
-        </p>
-        <div className="bpTicket" data-phase={phase}>
-          <div className="bpBody" style={phase === "tearing" ? { clipPath: TEAR } : undefined}>
-            <div className="bpHead"><span>Boarding pass</span><span className="bpAir"><Plane size={14} aria-hidden="true" />Homeroom Air</span></div>
-            <div className="bpRoute" aria-hidden="true"><b>HRM</b><span><Plane size={16} /></span><b>{gateCode}</b></div>
-            <label className="bpLab" htmlFor="bpn">Passenger</label>
-            <input id="bpn" className="bpName" value={uname} placeholder="your name" maxLength={20}
-              readOnly={replay || phase !== "fill"} autoCapitalize="none" autoCorrect="off" autoComplete="off" spellCheck={false}
-              onChange={(e) => setUname(e.target.value)} onKeyDown={(e) => e.key === "Enter" && stamp()} />
-            {!replay && phase === "fill" && <p className={`bpHint${uname && !nameOk ? " bad" : ""}`}>3 to 20 characters: letters, numbers, dots or underscores.</p>}
-            {replay || phase !== "fill"
-              ? <><div className="bpLab" style={{ marginTop: 16 }}>Gate, your class</div><div className="bpGate">{gate || "Not chosen"}</div></>
-              : <div className="bpClass"><ClassPicker classes={classes} value={cls} onPick={setCls} onCreated={setClasses} /></div>}
-            <div className="bpGrid">
-              <div><small>Date</small><b>{today}</b></div>
-              <div><small>Departs</small><b>Now</b></div>
-              <div><small>Status</small><b>{phase === "fill" ? "Not checked in" : "Checked in"}</b></div>
-            </div>
-            {phase !== "fill"
-              ? <div className="bpStamp" aria-hidden="true"><span>Homeroom</span><b>{gate}</b><span>Checked in</span></div>
-              : <div className="bpGhost" aria-hidden="true" />}
-            {(phase === "stamping" || phase === "stamped") && (
-              <div className="bpBits" aria-hidden="true">{Array.from({ length: 16 }, (_, i) => <i key={i} style={{ "--a": `${i * 22.5}deg`, "--d": `${64 + ((i * 29) % 48)}px` }} />)}</div>
-            )}
-          </div>
-          <div className="bpStub" role={phase === "stamped" ? "button" : undefined} tabIndex={phase === "stamped" ? 0 : undefined}
-            aria-label={phase === "stamped" ? "Tear off the stub" : undefined}
-            onClick={tear} onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); tear(); } }}>
-            <i className="bpBars" aria-hidden="true" />
-            <small>Admit one</small>
-          </div>
-        </div>
-        {err && <p className="err" role="alert" style={{ marginTop: 14, textAlign: "center" }}>{err}</p>}
-        <div className="bpAct">
-          {phase === "fill" && <button className="bpGo" disabled={!ready || busy} onClick={stamp}>{busy ? <>Checking in<Dots /></> : "Stamp my pass"}</button>}
-          {phase === "stamping" && <button className="bpGo" disabled>Stamping</button>}
-          {phase === "stamped" && <button className="bpGo" data-pulse="1" onClick={tear}>Tear off the stub</button>}
-        </div>
-      </div>
-    </div>
-  );
-}
-
-/* The plane that flies across the screen, wiping the cream away so the app is underneath. */
-function PlaneCurtain({ go, onDone }) {
-  const ref = useRef(null);
-  const done = useRef(onDone); done.current = onDone;
-  useEffect(() => {
-    if (!go) return undefined;
-    const el = ref.current;
-    const reduce = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-    const dur = reduce ? 450 : 2100;
-    const t0 = performance.now();
-    let raf = 0, rang = false;
-    const ease = (t) => (t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2);
-    if (!reduce) Sound.play("whoosh");
-    const tick = (now) => {
-      const t = Math.min(1, (now - t0) / dur);
-      const x = -0.14 + ease(t) * 1.34;
-      el.style.setProperty("--x", x.toFixed(4));
-      el.style.setProperty("--tf", String(Math.max(0, Math.min(1, (1.16 - x) / 0.34))));
-      if (!rang && x > 0.5 && !reduce) { rang = true; Sound.play("bell"); }
-      if (t < 1) raf = requestAnimationFrame(tick); else done.current();
-    };
-    raf = requestAnimationFrame(tick);
-    return () => cancelAnimationFrame(raf);
-  }, [go]);
-  return (
-    <div className="curtain" ref={ref} style={{ "--x": -0.14, "--tf": 1 }} data-go={go ? 1 : 0} aria-hidden="true">
-      <div className="curtainSky" />
-      <i className="trail" />
-      <svg className="jet" viewBox="0 0 170 64" fill="none">
-        <path d="M20 30 8 6h15l24 24Z" fill="var(--accent)" />
-        <path d="M72 38 50 62h17l36-24Z" fill="var(--accent)" opacity=".85" />
-        <path d="M8 34c0-8 14-11 36-11h82c22 0 36 6 36 11s-14 11-36 11H44C22 45 8 42 8 34Z" fill="var(--paper)" stroke="var(--ink)" strokeWidth="2.4" strokeLinejoin="round" />
-        <g fill="var(--ink)" opacity=".72">{[34, 48, 62, 76, 90, 104].map((cx) => <circle key={cx} cx={cx} cy="33" r="2.5" />)}</g>
-        <path d="M130 27h12c6 0 12 3 13 7h-25Z" fill="var(--ink)" opacity=".8" />
-        <path d="M70 38 56 54h14l22-16Z" fill="var(--paper)" stroke="var(--ink)" strokeWidth="2" strokeLinejoin="round" />
-      </svg>
-    </div>
-  );
-}
-
 /* ───────────────────────── the cabin: your class as a seat map ───────────────────────── */
 
 const WEEK_LABEL = { complete: "Complete", almost: "Almost there", starting: "Starting", nothing: "Nothing" };
@@ -5482,7 +5359,12 @@ export default function App() {
   const [helpOpen, setHelpOpen] = useState(false);
   const gKey = useRef(0);
   const [toast, setToast] = useState(null);
-  const [tour, setTour] = useState(false); // the hands-on welcome tour
+  // The onboarding state machine (see onboarding/machine.js). Its ticket phases (BLANK, STAMP, TEAR) live inside <Onboarding>;
+  // from the take-off on it is owned here: PLANE_ANIMATION, then WALKTHROUGH (the hands-on tour), then COMPLETE.
+  const [obPhase, sendOb] = useReducer(reduceOnboarding, PHASE.COMPLETE);
+  const [obMandatory, setObMandatory] = useState(true); // a first run can't be skipped; a replay from the account menu can
+  const obChecked = useRef(false); // the saved flag is looked at once per sign-in
+  const tour = obPhase === PHASE.WALKTHROUGH;
   const [unbox, setUnbox] = useState(null); // null: the app is out of the box. A list: still wrapped, these pieces are unpacked so far
   const [demo, setDemo] = useState("todo"); // status of the practice task (lives only in the tour)
   const tourUi = useRef(null); // the person's own list settings, put back when the tour ends
@@ -5760,19 +5642,21 @@ export default function App() {
   // The boarding pass: save the username and class, then (after the stamp and the tear) take off.
   const submitPass = async (u, cid) => {
     const { error } = await supabase.rpc("complete_profile", { uname: u, cls: cid });
-    if (!error) return null;
+    if (!error) { await writeOnboardingFlag(supabase, false); return null; } // "in onboarding" from the moment the ticket is stamped
     if (/duplicate|unique/i.test(error.message)) return "Someone already has that name. Try another.";
     if (/already set up/i.test(error.message)) return "This account already has a boarding pass. Sign out and sign back in.";
     return "Couldn't save your pass: " + error.message;
   };
   const takeoff = async (u, cid) => {
     setUnbox([]); // the app starts out wrapped, so the plane lands on an empty box
+    obChecked.current = true; setObMandatory(true); sendOb(EVENT.TORN);
     setNeedPass(false); setCurtain("wait");
     await onAuthed(u, cid, false, true);
     setCurtain("fly");
   };
-  const replayTakeoff = () => { setUnbox([]); setWelcome(false); setCurtain("fly"); };
-  const landed = () => { setCurtain(null); setTour(true); }; // the plane lands, and the tour starts unpacking
+  const replayTakeoff = () => { setUnbox([]); setObMandatory(false); sendOb(EVENT.TORN); setWelcome(false); setCurtain("fly"); };
+  const planeMid = () => sendOb(EVENT.PLANE_MIDPOINT); // the plane is past halfway: the walkthrough begins while it is still in the air
+  const landed = () => setCurtain(null);
   const openChat = (n) => { cabin.clearUnread(n); setChat(n); setCabinOpen(false); };
   const joinGroup = (id, join) => mutate("groups", setGroups, (c) => c.map((x) => {
     if (x.id !== id) return x;
@@ -5797,13 +5681,24 @@ export default function App() {
     setDelOpen(false); signOut();
   };
   const finishTour = async () => {
-    setTour(false); setUnbox(null); setDemo("todo");
+    sendOb(EVENT.FINISHED); setUnbox(null); setDemo("todo");
     setDetailId(null); setForm(null); setSearchOpen(false);
     if (tourUi.current) { setUi(tourUi.current); tourUi.current = null; }
     if (user) await store.set(`intro:${user}`, true);
+    await writeOnboardingFlag(supabase, true); // hasCompletedOnboarding = true, on the account, so it follows the person to any device
     Sound.play("add");
   };
   useEffect(() => { if (tour && !tourUi.current) tourUi.current = ui; }, [tour]);
+  // Mandatory: someone who stamped their ticket but never finished the walkthrough (closed the tab, lost signal) is sent back
+  // into it the next time they open the app, on any device. Accounts from before onboarding have no flag and are left alone.
+  useEffect(() => {
+    if (!user || !ready || curtain || welcome || obChecked.current) return;
+    obChecked.current = true;
+    readOnboardingFlag(supabase).then((flag) => {
+      if (!onboardingNeeded(flag)) return;
+      setUnbox([]); setObMandatory(true); sendOb(EVENT.RESUME);
+    });
+  }, [user, ready, curtain, welcome]);
   const tourGo = (s = {}) => {
     setTab(s.tab || "tasks");
     setDetailId(s.detail ? DEMO_ID : null);
@@ -5818,7 +5713,7 @@ export default function App() {
     clearDraft();
     await supabase.auth.signOut(); setIsAdmin(false);
     Sound.stopMusic();
-    setUser(null); setMenu(false); setTab("tasks"); setTour(false); setUnbox(null);
+    setUser(null); setMenu(false); setTab("tasks"); sendOb(EVENT.RESET); obChecked.current = false; setUnbox(null);
     setTasks([]); setMaterials([]); setComments([]); setCompletions({}); setAnnouncements([]); setWeeklies([]); setProofs({}); setGroups([]); setSubjectDefs([]); setKb({});
     backfilled.current = false;
   };
@@ -6000,31 +5895,32 @@ export default function App() {
 
   if (registered) {
     const go = () => { window.history.replaceState(null, "", window.location.pathname); setRegistered(false); };
-    return <div className="hr solo" data-theme={themeAttr} style={accentStyle}><style>{CSS}</style><AuthShell><Registered onGo={go} /></AuthShell></div>;
+    return <div className="hr solo" data-theme={themeAttr} style={accentStyle}><style>{STYLES}</style><AuthShell><Registered onGo={go} /></AuthShell></div>;
   }
   if (!ready) {
-    return <div className="hr solo" data-theme={themeAttr} style={accentStyle}><style>{CSS}</style><Backdrop /><Splash /></div>;
+    return <div className="hr solo" data-theme={themeAttr} style={accentStyle}><style>{STYLES}</style><Backdrop /><Splash /></div>;
   }
   if (recovering) {
     const done = () => { window.history.replaceState(null, "", window.location.pathname); setRecovering(false); };
-    return <div className="hr solo" data-theme={themeAttr} style={accentStyle}><style>{CSS}</style><AuthShell><ResetPassword onDone={done} /></AuthShell></div>;
+    return <div className="hr solo" data-theme={themeAttr} style={accentStyle}><style>{STYLES}</style><AuthShell><ResetPassword onDone={done} /></AuthShell></div>;
   }
   if (needPass && !curtain) {
     const signOutPass = async () => { await supabase.auth.signOut(); setNeedPass(false); };
     return (
-      <div className="hr solo" data-theme={themeAttr} style={accentStyle}><style>{CSS}</style>
-        <BoardingPass classes={classes} setClasses={setClasses} onSubmit={submitPass} onTakeoff={takeoff} onSignOut={signOutPass} />
+      <div className="hr solo" data-theme={themeAttr} style={accentStyle}><style>{STYLES}</style>
+        <Onboarding classes={classes} onSubmit={submitPass} onTakeoff={takeoff} onSignOut={signOutPass} sound={Sound}
+          classPicker={(value, onPick) => <ClassPicker classes={classes} value={value} onPick={onPick} onCreated={setClasses} />} />
       </div>
     );
   }
   if (!user && !curtain) {
-    return <div className="hr solo" data-theme={themeAttr} style={accentStyle}><style>{CSS}</style><AuthShell><BoxGate><Auth onAuthed={onAuthed} onNeedPass={async () => { setClasses(await store.classes.list()); setNeedPass(true); }} /></BoxGate></AuthShell></div>;
+    return <div className="hr solo" data-theme={themeAttr} style={accentStyle}><style>{STYLES}</style><AuthShell><BoxGate><Auth onAuthed={onAuthed} onNeedPass={async () => { setClasses(await store.classes.list()); setNeedPass(true); }} /></BoxGate></AuthShell></div>;
   }
   if (isAdmin) {
     return <AdminApp themeAttr={themeAttr} accentStyle={accentStyle} theme={theme} setTheme={setTheme} onSignOut={signOut} />;
   }
   if (!classId) {
-    return <div className="hr solo" data-theme={themeAttr} style={accentStyle}><style>{CSS}</style><AuthShell><ClassGate classes={classes} setClasses={setClasses} onChoose={chooseClass} /></AuthShell></div>;
+    return <div className="hr solo" data-theme={themeAttr} style={accentStyle}><style>{STYLES}</style><AuthShell><ClassGate classes={classes} setClasses={setClasses} onChoose={chooseClass} /></AuthShell></div>;
   }
   const classLabel = classes.find((c) => c.id === classId)?.label;
   const tabs = [
@@ -6097,7 +5993,7 @@ export default function App() {
 
   return (
     <div className={swap ? "hr app swap" : "hr app"} data-unbox={unbox ? unbox.join(" ") : undefined} data-theme={themeAttr} data-wide={tab === "tasks" && ui.mode === "board" && !detail ? 1 : 0} style={accentStyle}>
-      <style>{CSS}</style>
+      <style>{STYLES}</style>
       <Backdrop />
       {syncing && <div className="sync" aria-hidden="true" />}
       <a className="skip" href="#main" onClick={(e) => { e.preventDefault(); const m = document.getElementById("main"); if (m) m.focus(); }}>Skip to content</a>
@@ -6309,15 +6205,15 @@ export default function App() {
       <Sheet open={fbOpen} onClose={() => setFbOpen(false)} title="Send a suggestion">
         {fbOpen && <FeedbackForm onSend={sendFeedback} onClose={() => setFbOpen(false)} />}
       </Sheet>
-      {welcome && <BoardingPass replay name={user} classLabel={classLabel} onTakeoff={replayTakeoff} onSkip={() => setWelcome(false)} />}
-      {curtain && <PlaneCurtain go={curtain === "fly"} onDone={landed} />}
+      {welcome && <Onboarding replay name={user} classLabel={classLabel} classes={classes} onTakeoff={replayTakeoff} onSkip={() => setWelcome(false)} sound={Sound} classPicker={() => null} />}
+      {curtain && <PlaneFlight go={curtain === "fly"} onMid={planeMid} onDone={landed} sound={Sound} />}
       <Sheet open={!!chat} onClose={() => setChat(null)} title="Chat">
         {chat && <ChatSheet key={chat} peer={chat} me={user} classId={classId} thread={threads.current[chat]} saveThread={(p, m) => { threads.current[p] = m; }} ring={cabin.ring} peerOnline={cabin.online.has(chat)} />}
       </Sheet>
       <Sheet open={cabinOpen && bp !== "desktop"} onClose={() => setCabinOpen(false)} title="Your class">
         <Cabin inSheet me={user} cabin={cabin} tasks={tasks} completions={completions} groups={groups} subjects={subjects} onChat={openChat} />
       </Sheet>
-      {tour && <Tour user={user} bp={bp} ctx={tourCtx} go={tourGo} onDone={finishTour} onReveal={setUnbox} />}
+      {tour && <Tour user={user} bp={bp} ctx={tourCtx} go={tourGo} onDone={finishTour} onReveal={setUnbox} mandatory={obMandatory} />}
     </div>
   );
 }
