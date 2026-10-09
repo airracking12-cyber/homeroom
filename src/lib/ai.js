@@ -9,6 +9,18 @@ export const GEMINI = "/api/gemini";
 export const GROQ = "/api/groq";
 export const GROQ_MODEL = "openai/gpt-oss-120b";
 
+// Nothing may hang forever: a request that gets no answer is given up on, and the backup provider (or an error message)
+// takes over. Reading a PDF or photo is slower, so it gets longer. A stream that goes quiet is also given up on.
+export const limits = { call: 60000, media: 120000, idle: 30000 };
+const callMs = (messages) => (hasMedia(messages) ? limits.media : limits.call);
+async function fetchT(url, init, ms) {
+  const ctl = new AbortController();
+  const id = setTimeout(() => ctl.abort(), ms);
+  try { return await fetch(url, { ...init, signal: ctl.signal }); }
+  catch (e) { if (ctl.signal.aborted) throw new Error("The assistant took too long to answer"); throw e; }
+  finally { clearTimeout(id); }
+}
+
 export function toGemini(system, messages) {
   const contents = messages.map((m) => ({
     role: m.role === "user" ? "user" : "model",
@@ -41,10 +53,10 @@ export const slowDown = () => Object.assign(new Error("You're going quickly. Giv
 export const geminiText = (data) => (data?.candidates?.[0]?.content?.parts || []).map((x) => x.text || "").join("");
 
 export async function geminiCall(system, messages) {
-  const res = await fetch(`${GEMINI}?mode=generate`, {
+  const res = await fetchT(`${GEMINI}?mode=generate`, {
     method: "POST", headers: await getHeaders(),
     body: JSON.stringify(toGemini(system, messages)),
-  });
+  }, callMs(messages));
   if (ownLimit(res)) throw slowDown();
   if (!res.ok) throw new Error(`Gemini ${res.status}`);
   const text = geminiText(await res.json());
@@ -53,10 +65,10 @@ export async function geminiCall(system, messages) {
 }
 
 export async function groqCall(system, messages) {
-  const res = await fetch(GROQ, {
+  const res = await fetchT(GROQ, {
     method: "POST", headers: await getHeaders(),
     body: JSON.stringify(toGroq(system, messages, false)),
-  });
+  }, limits.call);
   if (ownLimit(res)) throw slowDown();
   if (!res.ok) throw new Error(`Groq ${res.status}`);
   const text = (await res.json())?.choices?.[0]?.message?.content || "";
@@ -70,8 +82,13 @@ export async function readSSE(res, pick, onText) {
   const reader = res.body.getReader();
   const dec = new TextDecoder();
   let buf = "", full = "";
+  // each read must produce something within limits.idle, or the stream is treated as stalled
+  const read = () => new Promise((resolve, reject) => {
+    const id = setTimeout(() => { reader.cancel().catch(() => {}); reject(new Error("stream stalled")); }, limits.idle);
+    reader.read().then((r) => { clearTimeout(id); resolve(r); }, (e) => { clearTimeout(id); reject(e); });
+  });
   for (;;) {
-    const { done, value } = await reader.read();
+    const { done, value } = await read();
     if (done) break;
     buf += dec.decode(value, { stream: true });
     const lines = buf.split("\n");
@@ -99,20 +116,20 @@ export async function callClaude(system, messages) {
 export async function streamClaude(system, messages, onText) {
   {
     try {
-      const res = await fetch(`${GEMINI}?mode=stream`, {
+      const res = await fetchT(`${GEMINI}?mode=stream`, {
         method: "POST", headers: await getHeaders(),
         body: JSON.stringify(toGemini(system, messages)),
-      });
+      }, callMs(messages)); // the deadline is for the first answer to start; after that, limits.idle watches the stream
       if (ownLimit(res)) throw slowDown();
       return await readSSE(res, geminiText, onText);
     } catch (e) { if (e.limited) throw e; console.warn("Gemini stream failed, trying Groq", e); }
   }
   if (!hasMedia(messages)) {
     try {
-      const res = await fetch(GROQ, {
+      const res = await fetchT(GROQ, {
         method: "POST", headers: await getHeaders(),
         body: JSON.stringify(toGroq(system, messages, true)),
-      });
+      }, limits.call);
       if (ownLimit(res)) throw slowDown();
       return await readSSE(res, (d) => d?.choices?.[0]?.delta?.content || "", onText);
     } catch (e) { if (e.limited) throw e; console.warn("Groq stream failed", e); }

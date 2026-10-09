@@ -6,6 +6,7 @@ import { pad, toISO, todayISO, parse, addDays, diffDays, fmtDate, todayLong, rel
 import { setAuthHeaders, callClaude, streamClaude, parseJSON } from "./lib/ai.js";
 import { SUBJ, SUBJ_REG, subjColor, SWATCHES, EMAIL_RE, TYPES, REVIEW_TYPES, QUARTERS, MAX_PROOF, needsProofType, wantsProof, PRIORITIES, STATUSES, DEFAULT_SUBJECTS, statusLabel } from "./lib/constants.js";
 import { LS, createStore } from "./lib/store.js";
+import { createNotes, normTopic, matchTopic, topicList, MAX_BODY } from "./lib/notes.js";
 import { createDebouncedSaver } from "./lib/debounce.js";
 import Onboarding from "./onboarding/Onboarding.jsx";
 import PlaneFlight from "./onboarding/PlaneFlight.jsx";
@@ -20,7 +21,7 @@ import {
   List as ListIcon, Gamepad2, Copy, Search, Music,
   Camera, FolderPlus, Folder, BadgeCheck, RotateCcw, Flame, Timer, Play, Pause, Columns3, SlidersHorizontal,
   Lightbulb, CircleAlert, LogOut, Sun, Moon, Hourglass, Target, Inbox, Plane,
-  CheckCheck, GraduationCap,
+  CheckCheck, GraduationCap, Lock,
 } from "lucide-react";
 
 /* ───────────────────────── tokens (CSS variables, so dark mode just works) ───────────────────────── */
@@ -68,6 +69,7 @@ const summarize = (list) =>
 /* ───────────────────────── storage ───────────────────────── */
 
 const store = createStore(supabase);
+const notes = createNotes(supabase); // class notes and their ideas live in real tables (see lib/notes.js)
 
 async function loadProfile(id) {
   const { data } = await supabase.from("profiles").select("username,class_id,is_admin").eq("id", id).maybeSingle();
@@ -297,16 +299,17 @@ async function extractFromFile(file) {
 /* the study-assistant client lives in ./lib/ai.js */
 
 
-function buildContext(tasks, materials, progress, user, kb) {
+function buildContext(tasks, materials, progress, user, found) {
   const list = tasks
     .map((t) => `[${t.id}] ${t.title} | subject: ${t.subject} | type: ${t.type} | priority: ${t.priority} | due ${t.deadline} (${parse(t.deadline).toLocaleDateString("en-US", { weekday: "long" })}) | ${user}'s status: ${statusLabel(progress[t.id])} | notes: ${t.notes || "none"} | added by ${t.addedBy}`)
     .join("\n");
-  const mats = materials
-    .map((m) => {
-      const ideas = kb && kb[m.id] && kb[m.id].n === (m.text || "").length ? kb[m.id].ideas : null; // the full ideas list when we have it, so nothing gets cut off
-      return `--- Review material "${m.title}" for [${m.taskId}], by ${m.by}\n${ideas && ideas.length ? ideas.map((i) => `${i.t}: ${i.d}`).join("\n") : (m.text || "").slice(0, 2500)}`;
-    })
-    .join("\n").slice(0, 40000);
+  // The assistant is not handed every note. It gets a short catalogue (titles only) plus the ideas the database found
+  // for this very question (see notes.findIdeas), so answers stay on topic and fast however many notes the class has.
+  const catalogue = materials.slice(0, 150).map((m) => `- "${m.title}" (${m.subject}${m.topic ? `, topic: ${m.topic}` : ""}${m.taskId ? `, for [${m.taskId}]` : ""}, by ${m.by})`).join("\n");
+  const hits = (found || []).map((i) => `${i.subject}${i.topic ? ` / ${i.topic}` : ""} (from "${i.mt}"): ${i.t}: ${i.d}`).join("\n").slice(0, 20000);
+  const mats = materials.length
+    ? `Notes the class has stored (titles only):\n${catalogue}\n\nIdeas from those notes that match this question:\n${hits || "(none matched. Say so, and suggest adding notes under Review > Library.)"}`
+    : "";
   return { today: todayLong(), list: list || "(no tasks yet)", mats: mats || "(no review material yet)" };
 }
 
@@ -2236,6 +2239,11 @@ function AuthShell({ children }) {
   );
 }
 
+// The class code a student typed. It is kept here (not in the picker's own state) because the picker is shown inside the
+// boarding pass and the class gate, and the two places that join a class (submitPass, chooseClass) read it from here.
+const joinCode = { value: "" };
+const codeError = (m) => (/wrong class code/i.test(m || "") ? "That class code isn't right. Ask your teacher or a classmate for it." : null);
+
 function ClassPicker({ classes, value, onPick, onCreated }) {
   const [adding, setAdding] = useState(false);
   const [year, setYear] = useState("");
@@ -2255,7 +2263,7 @@ function ClassPicker({ classes, value, onPick, onCreated }) {
     <div className="field">
       <label>Your class</label>
       <div className="chips" style={{ flexWrap: "wrap", overflow: "visible", padding: 0 }}>
-        {sorted.map((c) => <button key={c.id} className="chip" aria-pressed={value === c.id} onClick={() => onPick(c.id)}>{c.label}</button>)}
+        {sorted.map((c) => <button key={c.id} className="chip" aria-pressed={value === c.id} onClick={() => { if (c.id !== value) joinCode.value = ""; onPick(c.id); }}>{c.label}{c.locked && <Lock size={12} style={{ marginLeft: 6, verticalAlign: -1 }} aria-label="needs a class code" />}</button>)}
         <button className="chip" aria-pressed={adding} onClick={() => setAdding(!adding)}><Plus size={14} />{classes.length ? "My class isn't here" : "Add your class"}</button>
       </div>
       {adding && (
@@ -2268,6 +2276,12 @@ function ClassPicker({ classes, value, onPick, onCreated }) {
           <button className="btn ghost small" style={{ marginTop: 10 }} onClick={create}>Add class</button>
         </div>
       )}
+      {classes.find((c) => c.id === value)?.locked && (
+        <div style={{ marginTop: 12 }}>
+          <label htmlFor="cls-code">Class code</label>
+          <input key={value} id="cls-code" className="input" autoComplete="off" autoCapitalize="off" defaultValue={joinCode.value} onChange={(e) => { joinCode.value = e.target.value; }} placeholder="Ask your teacher or a classmate" />
+        </div>
+      )}
       <p className="meta" style={{ marginTop: 10, lineHeight: 1.5 }}>Everything you add or upload is shared only with people in your class.</p>
     </div>
   );
@@ -2275,13 +2289,15 @@ function ClassPicker({ classes, value, onPick, onCreated }) {
 
 function ClassGate({ classes, setClasses, onChoose }) {
   const [cls, setCls] = useState(null);
+  const [err, setErr] = useState("");
   return (
     <div className="authBody">
       <div className="mark authBrand" style={{ fontSize: 32, marginBottom: 18 }}>Homeroom</div>
       <h1 className="h1">Pick your class</h1>
       <p className="sub">Tasks and notes are shared only with the people in your class.</p>
       <ClassPicker classes={classes} value={cls} onPick={setCls} onCreated={setClasses} />
-      <button className="btn accent full" disabled={!cls} onClick={() => onChoose(cls)}>Continue</button>
+      {err && <p className="err" role="alert">{err}</p>}
+      <button className="btn accent full" disabled={!cls} onClick={async () => { setErr(""); const m = await onChoose(cls); if (m) setErr(m); }}>Continue</button>
     </div>
   );
 }
@@ -3199,15 +3215,22 @@ function PlanPanel({ tasks, progress }) {
 
 function SearchPanel({ tasks, materials, onTask, onMaterial }) {
   const [q, setQ] = useState("");
+  const [hits, setHits] = useState([]); // notes whose text mentions the words, found by the database
   const s = q.trim().toLowerCase();
+  useEffect(() => {
+    if (s.length < 2) { setHits([]); return; }
+    let dead = false;
+    const id = setTimeout(async () => { const r = await notes.search(s, 20); if (!dead && r) setHits(r); }, 300);
+    return () => { dead = true; clearTimeout(id); };
+  }, [s]);
   const tr = s ? tasks.filter((t) => [t.title, t.subject, t.type, t.notes].join(" ").toLowerCase().includes(s)).slice(0, 20) : [];
-  const mr = s ? materials.filter((m) => `${m.title} ${m.text}`.toLowerCase().includes(s)).slice(0, 20) : [];
-  const snip = (m) => {
-    const i = m.text.toLowerCase().indexOf(s);
-    if (i < 0) return "";
-    const a = Math.max(0, i - 40);
-    return (a > 0 ? "…" : "") + m.text.slice(a, i + 90).replace(/\s+/g, " ") + "…";
-  };
+  const byId = new Map(materials.map((m) => [m.id, m]));
+  const found = new Map();
+  if (s) {
+    hits.forEach((h) => { const m = byId.get(h.id); if (m) found.set(m.id, { m, snip: h.snippet }); });
+    materials.filter((m) => `${m.title} ${m.subject} ${m.topic}`.toLowerCase().includes(s)).forEach((m) => { if (!found.has(m.id)) found.set(m.id, { m, snip: "" }); });
+  }
+  const mr = [...found.values()].slice(0, 20);
   return (
     <div>
       <input className="input" autoFocus value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search tasks and review material" aria-label="Search" />
@@ -3229,12 +3252,12 @@ function SearchPanel({ tasks, materials, onTask, onMaterial }) {
       {mr.length > 0 && (
         <section className="group">
           <h3>Review material <small>{mr.length}</small></h3>
-          {mr.map((m) => (
+          {mr.map(({ m, snip }) => (
             <button key={m.id} className="row" onClick={() => onMaterial(m)}>
               <div className="rowMain">
                 <div className="rowTitle">{m.title}</div>
-                <div className="rowMeta"><span>{tasks.find((t) => t.id === m.taskId)?.title || "Removed task"}</span></div>
-                {snip(m) && <div style={{ fontSize: 14, color: C.muted, marginTop: 4, lineHeight: 1.5 }}>{snip(m)}</div>}
+                <div className="rowMeta"><span>{m.subject}</span>{m.topic && <span>{m.topic}</span>}<span>{tasks.find((t) => t.id === m.taskId)?.title || m.taskTitle || "Class notes"}</span></div>
+                {snip && <div style={{ fontSize: 14, color: C.muted, marginTop: 4, lineHeight: 1.5 }}>{snip}</div>}
               </div>
             </button>
           ))}
@@ -3246,16 +3269,44 @@ function SearchPanel({ tasks, materials, onTask, onMaterial }) {
 
 /* ───────────────────────── review ───────────────────────── */
 
-function ReviewDetail({ task, user, materials, addMaterial, removeMaterial, onBack, onStudy, kb, saveKb }) {
-  const mats = materials.filter((m) => m.taskId === task.id);
-  const [open, setOpen] = useState(null);
-  const [adding, setAdding] = useState(false);
+/* ───────────────────────── notes: add, open, edit ─────────────────────────
+   One "add notes" sheet is used both on a task's review page and in the Library. Every note gets a subject and a topic,
+   and is read into its ideas inventory right away, so the Study tab and the assistant can find the right lesson later. */
+
+const FILE_MAX = 10 * 1024 * 1024; // the assistant reads PDFs and photos up to this size
+
+// A short lesson name for some notes, offered to the student to accept or change.
+async function suggestTopic(text, subject) {
+  const raw = await callClaude(
+    "You name the lesson a set of class notes is about. Reply with ONLY the lesson name: 2 to 5 words, no quotes, no full stop.",
+    [{ role: "user", content: `Subject: ${subject || "General"}\n\nNOTES:\n${String(text).slice(0, 1500)}` }]
+  );
+  return normTopic(String(raw).split("\n")[0].replace(/["\u201c\u201d.]/g, ""));
+}
+
+function AddNotesSheet({ open, onClose, materials, subjects, onAddSubject, fixedSubject, defaultSubject, heading, onSave }) {
   const [title, setTitle] = useState("");
   const [text, setText] = useState("");
-  const [gen, setGen] = useState(false);
-  const [err, setErr] = useState("");
+  const [subject, setSubject] = useState(fixedSubject || defaultSubject || "");
+  const [topic, setTopic] = useState("");
   const [reading, setReading] = useState("");
+  const [suggesting, setSuggesting] = useState(false);
+  const [saving, setSaving] = useState("");
+  const [err, setErr] = useState("");
   const fileRef = useRef(null);
+  useEffect(() => { if (open) setSubject(fixedSubject || defaultSubject || ""); }, [open, fixedSubject, defaultSubject]);
+  const allTopics = useMemo(() => topicList(materials, subject ? [subject] : []), [materials, subject]);
+  const names = allTopics.map((x) => x.topic);
+
+  const suggest = async (txt) => {
+    const body = typeof txt === "string" ? txt : text;
+    if (!body.trim() || suggesting) return;
+    setSuggesting(true);
+    try { const t = await suggestTopic(body, subject); if (t) setTopic((cur) => cur.trim() || matchTopic(t, names)); }
+    catch { /* the student can type one */ }
+    finally { setSuggesting(false); }
+  };
+
   const onFile = async (e) => {
     const files = [...(e.target.files || [])];
     e.target.value = "";
@@ -3267,7 +3318,7 @@ function ReviewDetail({ task, user, materials, addMaterial, removeMaterial, onBa
       const f = files[i];
       setReading(files.length > 1 ? `Reading file ${i + 1} of ${files.length}` : "Reading file");
       try {
-        if (f.size > 20 * 1024 * 1024) throw new Error("big");
+        if (f.size > FILE_MAX) throw new Error("big");
         if (/\.pdf$/i.test(f.name) || f.type === "application/pdf" || f.type.startsWith("image/")) {
           const out = await extractFromFile(f);
           if (!out.trim()) throw new Error("empty");
@@ -3277,39 +3328,150 @@ function ReviewDetail({ task, user, materials, addMaterial, removeMaterial, onBa
           parts.push(t.slice(0, 20000));
         }
       } catch {
-        setErr(`Couldn't read ${f.name}. Files can be up to 20 MB: PDFs, photos, or text files.`);
+        setErr(`Couldn't read ${f.name}. Files can be up to 10 MB: PDFs, photos, or text files.`);
         Sound.play("err");
       }
     }
     setReading("");
-    if (parts.length) { setText((prev) => [prev.trim(), ...parts].filter(Boolean).join("\n\n")); Sound.play("pop"); }
+    if (parts.length) {
+      const merged = [text.trim(), ...parts].filter(Boolean).join("\n\n");
+      setText(merged); Sound.play("pop");
+      if (!topic.trim()) suggest(merged);
+    }
   };
+
+  const canSave = !!subject && !!text.trim() && !reading && !saving;
   const save = async () => {
-    await addMaterial({ id: uid(), taskId: task.id, title: title.trim() || "Untitled notes", text: text.trim(), by: user, kind: "upload", at: Date.now(), subject: task.subject, taskTitle: task.title });
-    Sound.play("add");
-    setAdding(false); setTitle(""); setText(""); setErr("");
+    setErr(""); setSaving("Saving");
+    const ok = await onSave({ title: title.trim() || "Untitled notes", text: text.trim(), subject, topic: matchTopic(topic, names), onProgress: setSaving });
+    setSaving("");
+    if (ok) { setTitle(""); setText(""); setTopic(""); onClose(); }
+    else { setErr("Couldn't save those notes just now. Check your connection and try again."); Sound.play("err"); }
   };
+
+  return (
+    <Sheet open={open} onClose={() => { if (!saving) onClose(); }} title={heading || "Add notes"}>
+      {!fixedSubject && (
+        <div className="field">
+          <label>Subject</label>
+          <SubjectPicker subjects={subjects} value={subject} onChange={setSubject} onAdd={onAddSubject} />
+        </div>
+      )}
+      <div className="field">
+        <label htmlFor="nt-topic">Topic or lesson</label>
+        <input id="nt-topic" className="input" value={topic} maxLength={60} onChange={(e) => setTopic(e.target.value)} placeholder="Photosynthesis" />
+        {allTopics.length > 0 && (
+          <div className="chips" style={{ flexWrap: "wrap", overflow: "visible", padding: 0, marginTop: 8 }}>
+            {allTopics.slice(0, 8).map((x) => (
+              <button key={x.topic} className="chip" aria-pressed={topic.trim().toLowerCase() === x.topic.toLowerCase()} onClick={() => { Sound.play("tap"); setTopic(x.topic); }}>{x.topic}</button>
+            ))}
+          </div>
+        )}
+        {text.trim() && !topic.trim() && (
+          <button className="back" style={{ marginTop: 8 }} disabled={suggesting} onClick={() => suggest()}>
+            <Sparkles size={14} style={{ verticalAlign: -2, marginRight: 6 }} />{suggesting ? <>Thinking<Dots /></> : "Suggest a topic"}
+          </button>
+        )}
+      </div>
+      <div className="field">
+        <label htmlFor="mt">Title</label>
+        <input id="mt" className="input" value={title} maxLength={120} onChange={(e) => setTitle(e.target.value)} placeholder="Lesson 2.1 key points" />
+      </div>
+      <div className="field">
+        <label htmlFor="mx">Notes</label>
+        <textarea id="mx" className="input" style={{ minHeight: 160 }} value={text} onChange={(e) => setText(e.target.value)} placeholder="Paste notes here" />
+      </div>
+      <input ref={fileRef} type="file" multiple accept=".pdf,image/*,.txt,.md,.csv,.json,text/plain" hidden onChange={onFile} />
+      <p style={{ fontSize: 13, color: C.muted, margin: "-6px 0 14px", lineHeight: 1.5 }}>
+        PDFs and photos are read by the assistant and turned into notes you can edit. Long files are condensed. After you share them, the assistant reads
+        your notes once so everyone can study from them.
+      </p>
+      {err && <p className="err">{err}</p>}
+      <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+        <button className="btn ghost" disabled={!!reading || !!saving} onClick={() => fileRef.current?.click()}>
+          <Upload size={15} style={{ verticalAlign: -2, marginRight: 6 }} />{reading ? <>{reading}<Dots /></> : "Upload PDF, photo or text file"}
+        </button>
+        <button className="btn accent" disabled={!canSave} onClick={save}>{saving ? <>{saving}<Dots /></> : !subject ? "Pick a subject first" : "Share with class"}</button>
+      </div>
+    </Sheet>
+  );
+}
+
+// The text of a note is only downloaded when someone opens it.
+function NoteBody({ id }) {
+  const [t, setT] = useState(null);
+  useEffect(() => {
+    let dead = false;
+    notes.text([id]).then((r) => { if (!dead) setT(r[id] ?? ""); });
+    return () => { dead = true; };
+  }, [id]);
+  if (t === null) return <div className="matBody"><span className="meta">Opening<Dots /></span></div>;
+  return <div className="matBody">{t || "Couldn't open this note. Check your connection and try again."}</div>;
+}
+
+// Change a note's subject, topic or title (its owner can).
+function EditNoteSheet({ note, materials, subjects, onAddSubject, onClose, onSave }) {
+  const [subject, setSubject] = useState("");
+  const [topic, setTopic] = useState("");
+  const [title, setTitle] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState("");
+  useEffect(() => { if (note) { setSubject(note.subject); setTopic(note.topic || ""); setTitle(note.title); setErr(""); } }, [note?.id]);
+  const known = useMemo(() => topicList(materials, subject ? [subject] : []), [materials, subject]);
+  const save = async () => {
+    setBusy(true); setErr("");
+    const ok = await onSave({ subject, topic: matchTopic(topic, known.map((x) => x.topic)), title: title.trim() || note.title });
+    setBusy(false);
+    if (ok) onClose(); else { setErr("Couldn't change that just now. Only the person who added a note can edit it."); Sound.play("err"); }
+  };
+  return (
+    <Sheet open={!!note} onClose={onClose} title="Edit details">
+      <div className="field">
+        <label>Subject</label>
+        <SubjectPicker subjects={[...new Set([...subjects, ...(note ? [note.subject] : [])])]} value={subject} onChange={setSubject} onAdd={onAddSubject} />
+      </div>
+      <div className="field">
+        <label htmlFor="en-topic">Topic or lesson</label>
+        <input id="en-topic" className="input" value={topic} maxLength={60} onChange={(e) => setTopic(e.target.value)} placeholder="Photosynthesis" />
+        {known.length > 0 && (
+          <div className="chips" style={{ flexWrap: "wrap", overflow: "visible", padding: 0, marginTop: 8 }}>
+            {known.slice(0, 8).map((x) => <button key={x.topic} className="chip" aria-pressed={topic.trim().toLowerCase() === x.topic.toLowerCase()} onClick={() => setTopic(x.topic)}>{x.topic}</button>)}
+          </div>
+        )}
+      </div>
+      <div className="field">
+        <label htmlFor="en-title">Title</label>
+        <input id="en-title" className="input" value={title} maxLength={120} onChange={(e) => setTitle(e.target.value)} />
+      </div>
+      {err && <p className="err">{err}</p>}
+      <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+        <button className="btn accent" disabled={busy || !subject} onClick={save}>{busy ? <>Saving<Dots /></> : "Save"}</button>
+      </div>
+    </Sheet>
+  );
+}
+
+function ReviewDetail({ task, user, materials, subjects, onAddSubject, addNote, removeMaterial, onBack, onStudy, onInventory }) {
+  const mats = materials.filter((m) => m.taskId === task.id);
+  const [open, setOpen] = useState(null);
+  const [adding, setAdding] = useState(false);
+  const [gen, setGen] = useState(false);
+  const [err, setErr] = useState("");
   // The reviewer is built from the full ideas inventory of the notes, then checked: anything it left out gets added back.
   const generate = async () => {
     setGen(true); setErr("");
-    const system = `You write clear, well-organized study reviewers for students. Plain text only, no markdown symbols, no emojis. Use short headed sections separated by blank lines. Include EVERY idea you are given, grouped by topic, one or two short lines each. Never add facts that are not in the list.`;
     try {
-      let body, ideas = [];
-      if (mats.length) {
-        const inv = await ensureInventory(mats.map((m) => ({ m, subject: task.subject })), kb, saveKb, null, null);
-        ideas = mats.flatMap((m) => inv[m.id]?.ideas || []);
-        body = `Make a reviewer for "${task.title}" (${task.subject}). Cover all ${ideas.length} of these ideas:\n${ideaLines(ideas)}`;
+      const source = mats.filter((m) => m.kind !== "ai");
+      let out;
+      if (source.length) {
+        const inv = await ensureInventory(source.map((m) => ({ m, subject: task.subject })), onInventory, null, null);
+        out = await writeReviewer(`"${task.title}" (${task.subject})`, source.flatMap((m) => inv[m.id]?.ideas || []));
       } else {
-        body = `Make a reviewer for "${task.title}" (${task.subject}, ${task.type}). Teacher notes: ${task.notes || "none"}. No material was uploaded, so cover the key ideas a student would likely need for this topic at a middle school level, and say at the top that it is a general reviewer.`;
+        out = (await callClaude(REVIEWER_SYSTEM, [{ role: "user", content: `Make a reviewer for "${task.title}" (${task.subject}, ${task.type}). Teacher notes: ${task.notes || "none"}. No material was uploaded, so cover the key ideas a student would likely need for this topic at a middle school level, and say at the top that it is a general reviewer.` }])).trim();
+        if (!out) throw new Error("empty");
       }
-      let out = (await callClaude(system, [{ role: "user", content: body }])).trim();
-      if (!out) throw new Error("empty");
-      const missing = ideas.filter((i) => !ideaCovered(out, i));
-      if (missing.length) {
-        try { out += "\n\n" + (await callClaude(system, [{ role: "user", content: `This reviewer left some ideas out. Write ONLY a short extra section titled Also remember, with one short line for each of these ideas:\n${ideaLines(missing)}` }])).trim(); }
-        catch { out += "\n\nAlso remember\n" + missing.map((i) => `${i.t}: ${i.d}`).join("\n"); }
-      }
-      await addMaterial({ id: uid(), taskId: task.id, title: `Reviewer for ${task.title}`, text: out, by: "Assistant", kind: "ai", at: Date.now(), subject: task.subject, taskTitle: task.title });
+      const ok = await addNote({ title: `Reviewer for ${task.title}`, text: out, kind: "ai", subject: task.subject, topic: source[0]?.topic || "", taskId: task.id, taskTitle: task.title });
+      if (!ok) throw new Error("save");
       Sound.play("bell");
     } catch {
       setErr("The assistant couldn't write a reviewer just now. Try again in a moment.");
@@ -3334,7 +3496,7 @@ function ReviewDetail({ task, user, materials, addMaterial, removeMaterial, onBa
           <Sparkles size={15} style={{ verticalAlign: -2, marginRight: 6 }} />{gen ? <>Writing reviewer<Dots /></> : "Ask for a reviewer"}
         </button>
       </div>
-      {err && !adding && <p className="err" style={{ marginTop: 14 }}>{err}</p>}
+      {err && <p className="err" style={{ marginTop: 14 }}>{err}</p>}
       <h2 className="sectionTitle">Review material</h2>
       {mats.length === 0 && <p style={{ color: C.muted, margin: 0 }}>Nothing here yet. Paste notes, or upload a PDF, photo or text file so classmates can use them too.</p>}
       {mats.map((m) => (
@@ -3343,14 +3505,15 @@ function ReviewDetail({ task, user, materials, addMaterial, removeMaterial, onBa
             <span>
               <span style={{ fontWeight: 500 }}>{m.title}</span>
               {m.kind === "ai" && <span className="tag">Assistant</span>}
+              {m.topic && <span className="tag">{m.topic}</span>}
               <span style={{ display: "block", fontSize: 13, color: C.muted }}>Added by {m.by}</span>
             </span>
             <ChevronDown size={18} style={{ stroke: "var(--faint)", transform: open === m.id ? "rotate(180deg)" : "none", transition: "transform .15s" }} />
           </button>
           {open === m.id && (
             <>
-              <div className="matBody">{m.text}</div>
-              {(m.by === user || m.kind === "ai") && (
+              <NoteBody id={m.id} />
+              {(m.mine || m.orphan) && (
                 <button className="back" style={{ color: C.danger, marginBottom: 12 }} onClick={() => removeMaterial(m.id)}>
                   <Trash2 size={14} style={{ marginRight: 6 }} />Remove
                 </button>
@@ -3362,32 +3525,14 @@ function ReviewDetail({ task, user, materials, addMaterial, removeMaterial, onBa
       <button className="btn ghost" style={{ marginTop: 18 }} onClick={() => setAdding(true)}>
         <Plus size={15} style={{ verticalAlign: -2, marginRight: 6 }} />Add material
       </button>
-      <Sheet open={adding} onClose={() => setAdding(false)} title="Add review material">
-        <div className="field">
-          <label htmlFor="mt">Title</label>
-          <input id="mt" className="input" value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Lesson 2.1 key points" />
-        </div>
-        <div className="field">
-          <label htmlFor="mx">Notes</label>
-          <textarea id="mx" className="input" style={{ minHeight: 160 }} value={text} onChange={(e) => setText(e.target.value)} placeholder="Paste notes here" />
-        </div>
-        <input ref={fileRef} type="file" multiple accept=".pdf,image/*,.txt,.md,.csv,.json,text/plain" hidden onChange={onFile} />
-        <p style={{ fontSize: 13, color: C.muted, margin: "-6px 0 14px", lineHeight: 1.5 }}>
-          PDFs and photos are read by the assistant and turned into notes you can edit. Long files are condensed.
-        </p>
-        {err && <p className="err">{err}</p>}
-        <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-          <button className="btn ghost" disabled={!!reading} onClick={() => fileRef.current?.click()}>
-            <Upload size={15} style={{ verticalAlign: -2, marginRight: 6 }} />{reading ? <>{reading}<Dots /></> : "Upload PDF, photo or text file"}
-          </button>
-          <button className="btn accent" disabled={!text.trim() || !!reading} onClick={save}>Share with class</button>
-        </div>
-      </Sheet>
+      <AddNotesSheet open={adding} onClose={() => setAdding(false)} materials={materials} subjects={subjects} onAddSubject={onAddSubject}
+        fixedSubject={task.subject} heading="Add review material"
+        onSave={(f) => addNote({ ...f, kind: "upload", taskId: task.id, taskTitle: task.title })} />
     </div>
   );
 }
 
-function WeeklyReviewer({ tasks, materials, weeklies, user, saveWeekly, initialWs, kb, saveKb, onStudy }) {
+function WeeklyReviewer({ tasks, materials, weeklies, user, saveWeekly, initialWs, onInventory, onStudy }) {
   const thisWeek = weekStartOf(todayISO());
   const lastWeek = addDays(thisWeek, -7);
   const [ws, setWs] = useState(initialWs || thisWeek);
@@ -3409,8 +3554,8 @@ function WeeklyReviewer({ tasks, materials, weeklies, user, saveWeekly, initialW
       ts.forEach((t) => slot(t.subject).tasks.push(t));
       ms.forEach((m) => slot(m.subject || tasks.find((t) => t.id === m.taskId)?.subject || "Other").mats.push(m));
       // every note is read into a full list of ideas first, so the page can't leave anything out
-      const items = Object.entries(by).flatMap(([s, d]) => d.mats.map((m) => ({ m, subject: s })));
-      const inv = await ensureInventory(items, kb, saveKb, (t) => setLive(t), null);
+      const items = Object.entries(by).flatMap(([s, d]) => d.mats.filter((m) => m.kind !== "ai").map((m) => ({ m, subject: s })));
+      const inv = await ensureInventory(items, onInventory, (t) => setLive(t), null);
       setLive("");
       const all = [];
       const body = Object.entries(by).map(([s, d]) => {
@@ -3478,31 +3623,101 @@ function WeeklyReviewer({ tasks, materials, weeklies, user, saveWeekly, initialW
   );
 }
 
-function Library({ tasks, materials, user, removeMaterial, kb, onStudy }) {
+function Library({ tasks, materials, user, subjects, onAddSubject, addNote, removeMaterial, relabelMaterial, onStudy, onInventory }) {
   const [subj, setSubj] = useState("All");
+  const [topic, setTopic] = useState("");
+  const [q, setQ] = useState("");
+  const [hits, setHits] = useState(null); // notes whose text mentions the words, found by the database: [{ id, snippet }]
   const [open, setOpen] = useState(null);
+  const [adding, setAdding] = useState(false);
+  const [editing, setEditing] = useState(null);
+  const [gen, setGen] = useState("");
+  const [err, setErr] = useState("");
+  const s = q.trim();
+  useEffect(() => {
+    if (s.length < 2) { setHits(null); return; }
+    let dead = false;
+    const id = setTimeout(async () => { const r = await notes.search(s, 50); if (!dead) setHits(r || []); }, 300);
+    return () => { dead = true; clearTimeout(id); };
+  }, [s]);
   const all = materials.map((m) => {
     const t = tasks.find((x) => x.id === m.taskId);
-    return { ...m, subject: m.subject || t?.subject || "Other", taskTitle: m.taskTitle || t?.title || "Removed task", gone: !t };
+    return { ...m, subject: m.subject || t?.subject || "Other", taskTitle: m.taskTitle || t?.title || "", gone: !!m.taskId && !t };
   });
-  const subjects = [...new Set(all.map((m) => m.subject))];
-  const list = all.filter((m) => subj === "All" || m.subject === subj).sort((a, b) => b.at - a.at);
+  const subjectsUsed = [...new Set(all.map((m) => m.subject))];
+  const topics = topicList(all, subj === "All" ? [] : [subj]);
+  const rank = new Map((hits || []).map((h, i) => [h.id, { snippet: h.snippet, i }]));
+  const low = s.toLowerCase();
+  const list = all
+    .filter((m) => (subj === "All" || m.subject === subj) && (!topic || m.topic === topic))
+    .filter((m) => !s || rank.has(m.id) || `${m.title} ${m.topic} ${m.subject}`.toLowerCase().includes(low))
+    .sort((a, b) => (s && rank.has(a.id) && rank.has(b.id) ? rank.get(a.id).i - rank.get(b.id).i : b.at - a.at));
+  const picked = subj !== "All" || !!topic || !!s;
+  const studyable = list.filter((m) => m.kind !== "ai");
+  const study = () => onStudy({ subjects: subj === "All" ? [] : [subj], topics: topic ? [topic] : [], q: s, period: "final" });
+  // A reviewer for exactly what is on screen: every idea from those notes, written up and saved to the Library for everyone.
+  const makeReviewer = async () => {
+    if (!studyable.length) { setErr("There are no notes in this selection yet."); return; }
+    setGen("Reading the notes"); setErr("");
+    try {
+      const inv = await ensureInventory(studyable.map((m) => ({ m, subject: m.subject })), onInventory, (t) => setGen(t), null);
+      let ideas = studyable.flatMap((m) => inv[m.id]?.ideas || []);
+      const capped = ideas.length > 250;
+      if (capped) ideas = ideas.slice(0, 250);
+      setGen("Writing the reviewer");
+      const label = [subj !== "All" ? subj : "all subjects", topic, s && `\u201c${s}\u201d`].filter(Boolean).join(", ");
+      const out = await writeReviewer(label, ideas);
+      const ok = await addNote({
+        title: `Reviewer: ${[topic || s, subj !== "All" ? subj : ""].filter(Boolean).join(" \u00b7 ") || "all notes"}`, text: out, kind: "ai",
+        subject: subj !== "All" ? subj : studyable[0].subject, topic: topic || "",
+      });
+      if (!ok) throw new Error("save");
+      Sound.play("bell");
+      if (capped) setErr("That was a lot of notes, so the reviewer covers the newest 250 ideas. Pick a topic to cover the rest.");
+    } catch {
+      setErr("The assistant couldn't write a reviewer just now. Try again in a moment.");
+      Sound.play("err");
+    } finally {
+      setGen("");
+    }
+  };
   return (
     <div style={{ marginTop: 14 }}>
-      <p style={{ color: C.muted, margin: "0 0 4px", lineHeight: 1.5 }}>
+      <p style={{ color: C.muted, margin: "0 0 12px", lineHeight: 1.5 }}>
         {all.length} {all.length === 1 ? "item" : "items"} of material and {tasks.length} tasks on record. Everything stays here, even after a task is finished or removed.
       </p>
-      {subjects.length > 0 && (
+      <button className="btn accent small" onClick={() => setAdding(true)}><Plus size={14} style={{ verticalAlign: -2, marginRight: 6 }} />Add notes</button>
+      <input className="input" style={{ marginTop: 14 }} value={q} onChange={(e) => setQ(e.target.value)} placeholder="Find a lesson: type a word or topic" aria-label="Search the notes" />
+      {subjectsUsed.length > 0 && (
         <div className="chips">
-          {["All", ...subjects].map((s) => (
-            <button key={s} className="chip" aria-pressed={subj === s} onClick={() => { Sound.play("tap"); setSubj(s); }}>
-              {s !== "All" && <span className="dot" style={{ background: subjColor(s), margin: 0 }} />}{s}
+          {["All", ...subjectsUsed].map((x) => (
+            <button key={x} className="chip" aria-pressed={subj === x} onClick={() => { Sound.play("tap"); setSubj(x); setTopic(""); }}>
+              {x !== "All" && <span className="dot" style={{ background: subjColor(x), margin: 0 }} />}{x}
             </button>
           ))}
         </div>
       )}
-      {subj !== "All" && list.length > 0 && <button className="btn ghost small" style={{ marginTop: 10 }} onClick={() => onStudy({ subjects: [subj], period: "final" })}>Study all of {subj}</button>}
-      {list.length === 0 && <div className="empty"><div className="serif">Nothing stored yet</div>Notes, uploads and reviewers collect here as your class adds them.</div>}
+      {topics.length > 0 && (
+        <div className="chips" style={{ marginTop: 6 }}>
+          <button className="chip" aria-pressed={!topic} onClick={() => { Sound.play("tap"); setTopic(""); }}>All topics</button>
+          {topics.map((x) => <button key={x.topic} className="chip" aria-pressed={topic === x.topic} onClick={() => { Sound.play("tap"); setTopic(topic === x.topic ? "" : x.topic); }}>{x.topic}</button>)}
+        </div>
+      )}
+      {picked && studyable.length > 0 && (
+        <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 12 }}>
+          <button className="btn accent small" disabled={!!gen} onClick={() => { Sound.play("tap"); study(); }}>Study these</button>
+          <button className="btn ghost small" disabled={!!gen} onClick={makeReviewer}>
+            <Sparkles size={14} style={{ verticalAlign: -2, marginRight: 6 }} />{gen ? <>{gen}<Dots /></> : "Make a reviewer"}
+          </button>
+        </div>
+      )}
+      {err && <p className="err" style={{ marginTop: 12 }}>{err}</p>}
+      {list.length === 0 && (
+        <div className="empty">
+          <div className="serif">{all.length === 0 ? "Nothing stored yet" : "Nothing matches"}</div>
+          {all.length === 0 ? "Notes, uploads and reviewers collect here as your class adds them." : "Try other words, or pick another subject or topic."}
+        </div>
+      )}
       {list.map((m) => (
         <div className="mat" key={m.id}>
           <button className="matHead" onClick={() => { Sound.play("tap"); setOpen(open === m.id ? null : m.id); }} aria-expanded={open === m.id}>
@@ -3511,26 +3726,33 @@ function Library({ tasks, materials, user, removeMaterial, kb, onStudy }) {
               {m.kind === "ai" && <span className="tag">Assistant</span>}
               <span className="rowMeta" style={{ marginTop: 2 }}>
                 <span><span className="dot" style={{ background: subjColor(m.subject) }} />{m.subject}</span>
-                <span>{m.taskTitle}{m.gone ? " (task removed)" : ""}</span>
+                {m.topic && <span>{m.topic}</span>}
+                {m.taskTitle && <span>{m.taskTitle}{m.gone ? " (task removed)" : ""}</span>}
                 <span>{fmtDate(toISO(new Date(m.at)))}</span>
-                {kb && kb[m.id] && kb[m.id].ideas.length > 0 && <span>{kb[m.id].ideas.length} key ideas</span>}
+                {m.ic > 0 && <span>{m.ic} key ideas</span>}
               </span>
+              {rank.get(m.id)?.snippet && <span style={{ display: "block", fontSize: 13, color: C.muted, marginTop: 4, lineHeight: 1.5 }}>{rank.get(m.id).snippet}</span>}
             </span>
             <ChevronDown size={18} style={{ stroke: "var(--faint)", flex: "none", transform: open === m.id ? "rotate(180deg)" : "none", transition: "transform .15s" }} />
           </button>
           {open === m.id && (
             <>
-              <div className="matBody">{m.text}</div>
+              <NoteBody id={m.id} />
               <p className="meta" style={{ margin: "-6px 0 10px" }}>Added by {m.by}</p>
-              {(m.by === user || m.kind === "ai") && (
-                <button className="back" style={{ color: C.danger, marginBottom: 12 }} onClick={() => removeMaterial(m.id)}>
-                  <Trash2 size={14} style={{ marginRight: 6 }} />Remove
-                </button>
+              {(m.mine || m.orphan) && (
+                <div style={{ display: "flex", gap: 16, marginBottom: 12 }}>
+                  <button className="back" onClick={() => setEditing(m)}><Pencil size={14} style={{ marginRight: 6 }} />Edit subject and topic</button>
+                  <button className="back" style={{ color: C.danger }} onClick={() => removeMaterial(m.id)}><Trash2 size={14} style={{ marginRight: 6 }} />Remove</button>
+                </div>
               )}
             </>
           )}
         </div>
       ))}
+      <AddNotesSheet open={adding} onClose={() => setAdding(false)} materials={materials} subjects={subjects} onAddSubject={onAddSubject}
+        defaultSubject={subj !== "All" ? subj : ""} heading="Add notes" onSave={(f) => addNote({ ...f, kind: "upload" })} />
+      <EditNoteSheet note={editing} materials={materials} subjects={subjects} onAddSubject={onAddSubject} onClose={() => setEditing(null)}
+        onSave={(patch) => relabelMaterial(editing.id, patch)} />
     </div>
   );
 }
@@ -3595,23 +3817,38 @@ async function aiIdeas(text, title, subject) {
 }
 
 
-// Reads every note that has no inventory yet (or whose text changed) and saves it for the whole class.
-async function ensureInventory(items, kb, saveKb, onProgress, tried) {
-  let cur = { ...kb };
-  const stale = (x) => !cur[x.m.id] || cur[x.m.id].n !== (x.m.text || "").length;
-  const todo = items.filter((x) => stale(x) || (cur[x.m.id]?.src === "local" && tried && !tried.has(x.m.id)));
+// Makes sure every note has its ideas inventory and returns { noteId: { src, ideas } } for all of them.
+// Stored inventories come from the database in one request. A note with none yet is read by the assistant once (usually
+// right when it is added) and the result is saved for the whole class. If the assistant is busy, a plain
+// sentence-by-sentence version keeps everything usable. onSaved(id, entry) lets the screen update its idea counts.
+async function ensureInventory(items, onSaved, onProgress, tried) {
+  let cur = {};
+  const ids = items.map((x) => x.m.id);
+  const have = items.filter((x) => x.m.ic > 0 || x.m.src);
+  if (have.length) cur = await notes.ideasFor(have.map((x) => x.m.id));
+  const todo = items.filter((x) => {
+    const stored = cur[x.m.id]?.ideas?.length > 0;
+    if (stored || x.m.ic > 0) return (cur[x.m.id]?.src || x.m.src) === "local" && tried && !tried.has(x.m.id); // a quick inventory is retried once per visit
+    return true;
+  });
   for (let i = 0; i < todo.length; i++) {
     const x = todo[i];
     if (onProgress) onProgress(`Reading your notes, ${i + 1} of ${todo.length}`);
     if (tried) tried.add(x.m.id);
-    let ideas, src = "ai";
-    try { ideas = await aiIdeas(x.m.text || "", x.m.title, x.subject); if (!ideas.length) throw new Error("none"); }
-    catch { if (cur[x.m.id] && cur[x.m.id].n === (x.m.text || "").length) continue; ideas = localIdeas(x.m.text); src = "local"; }
-    const entry = { n: (x.m.text || "").length, at: Date.now(), src, ideas };
+    const body = (await notes.text([x.m.id]))[x.m.id] || "";
+    if (!body.trim()) continue;
+    let list, src = "ai";
+    try { list = await aiIdeas(body, x.m.title, x.subject); if (!list.length) throw new Error("none"); }
+    catch { if (cur[x.m.id]?.ideas?.length) continue; list = localIdeas(body); src = "local"; }
+    if (!list.length) continue;
+    const count = await notes.saveIdeas(x.m.id, src, list);
+    if (count == null) { cur = { ...cur, [x.m.id]: { n: body.length, at: Date.now(), src, ideas: list } }; continue; } // couldn't save; still usable now
+    const entry = { n: body.length, at: Date.now(), src, ideas: list };
     cur = { ...cur, [x.m.id]: entry };
-    saveKb(x.m.id, entry);
+    if (onSaved) onSaved(x.m.id, entry);
   }
-  return cur;
+  // anything the database already held for notes outside the list above is not needed; return just what was asked for
+  return Object.fromEntries(ids.filter((id) => cur[id]).map((id) => [id, cur[id]]));
 }
 const ideaLines = (ideas) => ideas.map((i) => `- ${i.t}: ${i.d}`).join("\n");
 // does a piece of writing mention this idea? (checks its key word, or most of its label)
@@ -3621,6 +3858,20 @@ const ideaCovered = (text, idea) => {
   const w = norm(idea.t).split(" ").filter((x) => x.length > 3);
   return w.length > 0 && w.filter((x) => h.includes(x)).length / w.length >= 0.6;
 };
+
+const REVIEWER_SYSTEM = `You write clear, well-organized study reviewers for students. Plain text only, no markdown symbols, no emojis. Use short headed sections separated by blank lines. Include EVERY idea you are given, grouped by topic, one or two short lines each. Never add facts that are not in the list.`;
+// Writes a reviewer from a list of ideas, then checks it: anything the first draft left out is added back at the end.
+async function writeReviewer(heading, ideas) {
+  if (!ideas.length) throw new Error("no ideas");
+  let out = (await callClaude(REVIEWER_SYSTEM, [{ role: "user", content: `Make a reviewer for ${heading}. Cover all ${ideas.length} of these ideas:\n${ideaLines(ideas)}` }])).trim();
+  if (!out) throw new Error("empty");
+  const missing = ideas.filter((i) => !ideaCovered(out, i));
+  if (missing.length) {
+    try { out += "\n\n" + (await callClaude(REVIEWER_SYSTEM, [{ role: "user", content: `This reviewer left some ideas out. Write ONLY a short extra section titled Also remember, with one short line for each of these ideas:\n${ideaLines(missing)}` }])).trim(); }
+    catch { out += "\n\nAlso remember\n" + missing.map((i) => `${i.t}: ${i.d}`).join("\n"); }
+  }
+  return out;
+}
 
 // personal study data (your flashcard boxes, sessions, weekly plan): private to you
 function useStudy(user, onSaved) {
@@ -4149,13 +4400,15 @@ function PlanRun({ subjects, study, update, onStart, onExit }) {
 }
 
 const REC = { today: ["cards", "cloze"], week: ["teach", "quiz"], final: ["blurt", "exam"] };
-function StudyHub({ tasks, materials, subjects, kb, saveKb, user, classQuarter, scope, onSaved }) {
+function StudyHub({ tasks, materials, subjects, onInventory, user, classQuarter, scope, onSaved }) {
   const saved = (() => { try { return JSON.parse(localStorage.getItem("hr:study") || "{}"); } catch { return {}; } })();
   const [period, setPeriod] = useState(PERIODS.some((p) => p[0] === saved.period) ? saved.period : "week");
   const [pick, setPick] = useState(Array.isArray(saved.pick) ? saved.pick : []);
   const [focus, setFocus] = useState(null); // study just one task's notes
+  const [topicPick, setTopicPick] = useState([]); // narrow to some topics
+  const [q, setQ] = useState(""); // or find lessons by a word: the database picks the matching ideas
   useEffect(() => { try { localStorage.setItem("hr:study", JSON.stringify({ period, pick })); } catch { /* storage blocked */ } }, [period, pick]);
-  useEffect(() => { if (!scope) return; setFocus(scope.taskId || null); if (scope.period) setPeriod(scope.period); if (scope.taskId) setPick([]); else if (scope.subjects) setPick(scope.subjects); }, [scope?.id]);
+  useEffect(() => { if (!scope) return; setFocus(scope.taskId || null); if (scope.period) setPeriod(scope.period); if (scope.taskId) setPick([]); else if (scope.subjects) setPick(scope.subjects); setTopicPick(scope.taskId ? [] : scope.topics || []); setQ(scope.taskId ? "" : scope.q || ""); }, [scope?.id]);
   const [study, update] = useStudy(user, onSaved);
   const [run, setRun] = useState(null);
   const [prep, setPrep] = useState("");
@@ -4163,11 +4416,12 @@ function StudyHub({ tasks, materials, subjects, kb, saveKb, user, classQuarter, 
   const tried = useRef(new Set());
   const withSubj = useMemo(() => materials.map((m) => ({ m, t: tasks.find((x) => x.id === m.taskId), subject: subjectOfMat(m, tasks) })), [materials, tasks]);
   const subsWithNotes = useMemo(() => [...new Set(withSubj.map((x) => x.subject))], [withSubj]);
-  const pool = withSubj.filter((x) => (focus ? x.m.taskId === focus : inPeriod(x.m, x.t, period, classQuarter) && (pick.length === 0 || pick.includes(x.subject))));
+  const pool = withSubj.filter((x) => x.m.kind !== "ai" && (focus ? x.m.taskId === focus : inPeriod(x.m, x.t, period, classQuarter) && (pick.length === 0 || pick.includes(x.subject)) && (topicPick.length === 0 || topicPick.includes(x.m.topic))));
+  const topics = useMemo(() => topicList(materials.filter((m) => m.kind !== "ai"), pick), [materials, pick]);
   const focusTitle = focus ? tasks.find((t) => t.id === focus)?.title : null;
-  const stale = (x) => !kb[x.m.id] || kb[x.m.id].n !== (x.m.text || "").length;
-  const ideaCount = pool.reduce((n, x) => n + (stale(x) ? 0 : kb[x.m.id].ideas.length), 0);
-  const unread = pool.filter(stale).length;
+  // how many ideas are ready comes from each note's summary, so nothing has to be downloaded just to show the count
+  const ideaCount = pool.reduce((n, x) => n + (x.m.ic || 0), 0);
+  const unread = pool.filter((x) => !(x.m.ic > 0)).length;
   const dueCards = useMemo(() => {
     if (!study) return 0;
     const t = todayISO();
@@ -4175,18 +4429,29 @@ function StudyHub({ tasks, materials, subjects, kb, saveKb, user, classQuarter, 
   }, [study]);
   const weekSessions = study ? (study.log || []).filter((l) => l.at >= Date.now() - 7 * 864e5).length : 0;
 
-  const prepare = () => ensureInventory(pool, kb, saveKb, setPrep, tried.current);
+  const prepare = () => ensureInventory(pool, onInventory, setPrep, tried.current);
   const start = async (kind, subsOverride) => {
     setNote("");
     if (kind === "plan") { setRun({ kind, ideas: [], label: "plan" }); return; }
     if (subsOverride) setPick(subsOverride);
-    if (pool.length === 0) { setNote("There are no notes in this selection yet. Try a longer period, or add some notes under By task."); Sound.play("err"); return; }
+    const word = q.trim();
+    if (word && !focus) {
+      // a search: the database finds the matching ideas across the class's notes, and only those are studied
+      setPrep("Finding the lessons");
+      const found = await notes.findIdeas({ subjects: subsOverride || pick, topics: topicPick, q: word, limit: 120 });
+      setPrep("");
+      if (found === null) { setNote("Couldn't search just now. Check your connection and try again."); Sound.play("err"); return; }
+      if (found.length === 0) { setNote(`No lessons matched "${word}". Try fewer words, or check the spelling.`); Sound.play("err"); return; }
+      setRun({ kind, ideas: found, label: `\u201c${word}\u201d` });
+      return;
+    }
+    if (pool.length === 0) { setNote("There are no notes in this selection yet. Try a longer period, or add some notes under Library."); Sound.play("err"); return; }
     setPrep("Getting your notes ready");
     const cur = await prepare();
     const ideas = pool.flatMap((x) => (cur[x.m.id]?.ideas || []).map((id, i) => ({ ...id, id: `${x.m.id}:${i}`, mid: x.m.id, mt: x.m.title, subject: x.subject })));
     setPrep("");
     if (ideas.length === 0) { setNote("Couldn't find anything to study in those notes."); return; }
-    setRun({ kind, ideas, label: pick.length === 1 ? pick[0] : pick.length ? `${pick.length} subjects` : "Everything" });
+    setRun({ kind, ideas, label: topicPick.length === 1 ? topicPick[0] : pick.length === 1 ? pick[0] : pick.length ? `${pick.length} subjects` : "Everything" });
   };
   const exit = () => setRun(null);
   if (!study) return <p className="meta" style={{ marginTop: 20 }}>Loading<Dots /></p>;
@@ -4226,9 +4491,18 @@ function StudyHub({ tasks, materials, subjects, kb, saveKb, user, classQuarter, 
           </button>
         ))}
       </div>
+      {topics.length > 0 && (
+        <div className="chips" style={{ flexWrap: "wrap", overflow: "visible", padding: 0, marginTop: 8 }}>
+          <button className="chip" aria-pressed={topicPick.length === 0} onClick={() => { Sound.play("tap"); setTopicPick([]); }}>Every topic</button>
+          {topics.map((x) => (
+            <button key={x.topic} className="chip" aria-pressed={topicPick.includes(x.topic)} onClick={() => { Sound.play("tap"); setTopicPick((c) => (c.includes(x.topic) ? c.filter((t) => t !== x.topic) : [...c, x.topic])); }}>{x.topic}</button>
+          ))}
+        </div>
+      )}
+      <input className="input" style={{ marginTop: 12 }} value={q} onChange={(e) => setQ(e.target.value)} placeholder="Or find a lesson by a word (searches all notes)" aria-label="Find a lesson" />
       </>}
       <div className="scopeLine">
-        {pool.length === 0 ? "No notes in this selection yet." : <><b>{pool.length}</b> note{pool.length > 1 ? "s" : ""}{ideaCount > 0 && <>, <b>{ideaCount}</b> key ideas</>}{unread > 0 && <>, {unread} still to be read</>}. Every technique below uses all of them.</>}
+        {q.trim() && !focus ? <>Looking for <b>{"\u201c"}{q.trim()}{"\u201d"}</b> across your class's notes, and studying only the ideas that match.</> : pool.length === 0 ? "No notes in this selection yet." : <><b>{pool.length}</b> note{pool.length > 1 ? "s" : ""}{ideaCount > 0 && <>, <b>{ideaCount}</b> key ideas</>}{unread > 0 && <>, {unread} still to be read</>}. Every technique below uses all of them.</>}
       </div>
       <h3 className="stepLabel"><i>2</i>How do you want to review it?</h3>
       {GOALS.map(([g, title, sub]) => (
@@ -4250,7 +4524,7 @@ function StudyHub({ tasks, materials, subjects, kb, saveKb, user, classQuarter, 
   );
 }
 
-function ReviewTab({ tasks, progress, materials, weeklies, saveWeekly, user, addMaterial, removeMaterial, focusId, clearFocus, reviewStart, clearStart, onRefresh, subjects, kb, saveKb, classQuarter, onSaved }) {
+function ReviewTab({ tasks, progress, materials, weeklies, saveWeekly, user, addNote, removeMaterial, relabelMaterial, onAddSubject, focusId, clearFocus, reviewStart, clearStart, onRefresh, subjects, onInventory, classQuarter, onSaved }) {
   const [sel, setSel] = useState(focusId || null);
   const [all, setAll] = useState(false);
   const [section, setSection] = useState("study");
@@ -4262,7 +4536,7 @@ function ReviewTab({ tasks, progress, materials, weeklies, saveWeekly, user, add
   }, [reviewStart]);
   useEffect(() => { if (focusId) { setSel(focusId); clearFocus(); } }, [focusId]);
   const task = tasks.find((t) => t.id === sel);
-  if (task) return <ReviewDetail task={task} user={user} materials={materials} addMaterial={addMaterial} removeMaterial={removeMaterial} onBack={() => setSel(null)} onStudy={goStudy} kb={kb} saveKb={saveKb} />;
+  if (task) return <ReviewDetail task={task} user={user} materials={materials} subjects={subjects} onAddSubject={onAddSubject} addNote={addNote} removeMaterial={removeMaterial} onBack={() => setSel(null)} onStudy={goStudy} onInventory={onInventory} />;
   const sorted = [...tasks].sort((a, b) => a.deadline.localeCompare(b.deadline));
   const upcoming = sorted.filter((t) => (progress[t.id] || "todo") !== "done");
   const list = upcoming.filter((t) => all || REVIEW_TYPES.includes(t.type) || materials.some((m) => m.taskId === t.id));
@@ -4276,9 +4550,9 @@ function ReviewTab({ tasks, progress, materials, weeklies, saveWeekly, user, add
           : "Every note, upload and reviewer your class has stored."}
       </p>
       <Segmented value={section} onChange={setSection} tour="study-sections" options={[["study", "Study"], ["tasks", "By task"], ["weekly", "Weekly"], ["library", "Library"]]} />
-      {section === "study" && <div style={{ marginTop: 18 }}><StudyHub tasks={tasks} materials={materials} subjects={subjects} kb={kb} saveKb={saveKb} user={user} classQuarter={classQuarter} scope={scope} onSaved={onSaved} /></div>}
-      {section === "weekly" && <WeeklyReviewer key={startWs || "w"} initialWs={startWs} tasks={tasks} materials={materials} weeklies={weeklies} user={user} saveWeekly={saveWeekly} kb={kb} saveKb={saveKb} onStudy={goStudy} />}
-      {section === "library" && <Library tasks={tasks} materials={materials} user={user} removeMaterial={removeMaterial} kb={kb} onStudy={goStudy} />}
+      {section === "study" && <div style={{ marginTop: 18 }}><StudyHub tasks={tasks} materials={materials} subjects={subjects} onInventory={onInventory} user={user} classQuarter={classQuarter} scope={scope} onSaved={onSaved} /></div>}
+      {section === "weekly" && <WeeklyReviewer key={startWs || "w"} initialWs={startWs} tasks={tasks} materials={materials} weeklies={weeklies} user={user} saveWeekly={saveWeekly} onInventory={onInventory} onStudy={goStudy} />}
+      {section === "library" && <Library tasks={tasks} materials={materials} user={user} subjects={subjects} onAddSubject={onAddSubject} addNote={addNote} removeMaterial={removeMaterial} relabelMaterial={relabelMaterial} onStudy={goStudy} onInventory={onInventory} />}
       {section === "tasks" && (
         <div style={{ marginTop: 14 }}>
           <Segmented value={all ? "all" : "focus"} onChange={(v) => setAll(v === "all")} options={[["focus", "Quizzes and study"], ["all", "Everything"]]} />
@@ -4307,7 +4581,7 @@ function ReviewTab({ tasks, progress, materials, weeklies, saveWeekly, user, add
   );
 }/* ───────────────────────── ask ───────────────────────── */
 
-function AskTab({ user, tasks, materials, progress, addTask, kb }) {
+function AskTab({ user, tasks, materials, progress, addTask }) {
   const [msgs, setMsgs] = useState([]);
   const [text, setText] = useState("");
   const [busy, setBusy] = useState(false);
@@ -4322,7 +4596,10 @@ function AskTab({ user, tasks, materials, progress, addTask, kb }) {
     const idx = next.length;
     setMsgs([...next, { role: "ai", text: "", raw: "", added: [] }]);
     setBusy(true);
-    const ctx = buildContext(tasks, materials, progress, user, kb);
+    // the database picks the ideas that match this question (and the one before it, so "what about the second one?" still works)
+    const before = msgs.filter((m) => m.role === "user").slice(-1).map((m) => m.raw).join(" ");
+    const found = materials.length ? await notes.findIdeas({ q: `${before} ${q}`.trim(), limit: 40, any: true }).catch(() => null) : [];
+    const ctx = buildContext(tasks, materials, progress, user, found || []);
     const subjects = [...new Set(tasks.map((t) => t.subject))].join(", ") || "none yet";
     const system = `You are the built-in assistant inside Homeroom, a shared class reminders app. Today is ${ctx.today}. You are talking with ${user}.
 Everything the class has added so far:
@@ -4468,6 +4745,25 @@ function FeedbackForm({ onSend, onClose }) {
 
 const INBOX_LABEL = { problem: "Problem", request: "Suggestion" };
 
+// Optional join code for one class (admin). Empty means anyone can join; with a code, new students must type it.
+function ClassCodeEditor({ code, onSave }) {
+  const [v, setV] = useState(code);
+  const [busy, setBusy] = useState(false);
+  const make = () => { const a = "ABCDEFGHJKMNPQRSTUVWXYZ23456789"; setV(Array.from({ length: 6 }, () => a[Math.floor(Math.random() * a.length)]).join("")); };
+  const go = async (next) => { setBusy(true); await onSave(next); setBusy(false); };
+  return (
+    <div style={{ marginTop: 14, paddingTop: 14, borderTop: "1px solid var(--line)" }}>
+      <div className="meta" style={{ marginBottom: 8, lineHeight: 1.5 }}>{code ? "New students must enter this code to join. People already in the class are not affected." : "Open: anyone can join. Add a code to make new students enter it first."}</div>
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+        <input className="input" style={{ flex: "1 1 160px", minWidth: 0 }} value={v} maxLength={30} onChange={(e) => setV(e.target.value)} placeholder="Class code" aria-label="Class code" />
+        <button className="btn ghost small" onClick={make} disabled={busy}>Make one</button>
+        <button className="btn accent small" onClick={() => go(v)} disabled={busy || v.trim().length < 4 || v.trim() === code}>{code ? "Change" : "Set code"}</button>
+        {code && <button className="btn ghost small" onClick={() => { setV(""); go(""); }} disabled={busy}>Open the class</button>}
+      </div>
+    </div>
+  );
+}
+
 function AdminApp({ themeAttr, accentStyle, theme, setTheme, onSignOut }) {
   useSpotlight();
   const [tab, setTab] = useState("suggestions");
@@ -4484,6 +4780,18 @@ function AdminApp({ themeAttr, accentStyle, theme, setTheme, onSignOut }) {
   const loadMc = useCallback(async () => { const { data, error } = await supabase.rpc("mc_links_admin"); setMcLinks(error ? [] : data || []); }, []);
   useEffect(() => { if (MINECRAFT.on && tab === "minecraft") loadMc(); }, [tab, loadMc]);
   const unlinkAdmin = async (n) => { Sound.play("undo"); setMcLinks((c) => (c || []).filter((x) => x.mc_display !== n)); await supabase.rpc("mc_admin_unlink", { p_name: n }); };
+  const [codes, setCodes] = useState({});
+  const loadCodes = useCallback(async () => {
+    const { data, error } = await supabase.rpc("class_codes_admin");
+    if (!error) setCodes(Object.fromEntries((data || []).map((r) => [r.class_id, r.code])));
+  }, []);
+  useEffect(() => { if (tab === "classes") loadCodes(); }, [tab, loadCodes]);
+  const saveCode = async (id, code) => {
+    setQErr("");
+    const { error } = await supabase.rpc("set_class_code", { cls: id, new_code: code });
+    if (error) { setQErr("Couldn't save the code: " + error.message); return false; }
+    Sound.play("add"); loadCodes(); store.classes.list().then(setAdminClasses); return true;
+  };
   const setQuarter = async (id, q) => {
     setQErr(""); Sound.play("pop");
     setAdminClasses((c) => c.map((x) => (x.id === id ? { ...x, quarter: q } : x)));
@@ -4607,6 +4915,7 @@ function AdminApp({ themeAttr, accentStyle, theme, setTheme, onSignOut }) {
                       <div><div className="serif" style={{ fontSize: 22 }}>{c.label}</div><div className="meta">Currently in quarter {c.quarter || 1}</div></div>
                       <Segmented value={String(c.quarter || 1)} options={QUARTERS.map((q) => [String(q), `Q${q}`])} onChange={(v) => setQuarter(c.id, Number(v))} />
                     </div>
+                    <ClassCodeEditor key={c.id + ":" + (codes[c.id] || "")} code={codes[c.id] || ""} onSave={(v) => saveCode(c.id, v)} />
                   </div>
                 ))}
               </>
@@ -5334,7 +5643,7 @@ export default function App() {
   const [proofs, setProofs] = useState({});
   const [groups, setGroups] = useState([]);
   const [subjectDefs, setSubjectDefs] = useState([]);
-  const [kb, setKb] = useState({}); // the ideas inventory of every note, shared with the class (see StudyHub)
+
   const [subjOpen, setSubjOpen] = useState(false);
   const [proofFor, setProofFor] = useState(null);
   const [groupsOpen, setGroupsOpen] = useState(false);
@@ -5387,6 +5696,9 @@ export default function App() {
   const progressRef = useRef(progress); progressRef.current = progress;
   const tasksRef = useRef(tasks); tasksRef.current = tasks;
   const lastSync = useRef(0);
+  const progressQ = useRef(Promise.resolve()); // progress saves go one after another, so a quick tick then untick ends the right way round
+  const progressBusy = useRef(0);
+  const progressStamp = useRef(0);
   const toastTimer = useRef(null);
   const backfilled = useRef(false);
   const bp = useBreakpoint();
@@ -5456,16 +5768,26 @@ export default function App() {
 
   const loadShared = async (u, c) => {
     const cid = c || classRef.current;
-    setClasses(await store.classes.list());
-    if (!cid) return;
+    if (!cid) { setClasses(await store.classes.list()); return; }
     const k = (x) => `${cid}:${x}`;
-    const [t, mats, cm, comp, ann, wk, pr, gr, sj, kbv] = await Promise.all([
-      store.get(k("tasks"), true), store.get(k("materials"), true), store.get(k("comments"), true),
-      store.get(k("completions"), true), store.get(k("announcements"), true), store.get(k("weeklies"), true),
-      store.get(k("proofs"), true), store.get(k("groups"), true), store.get(k("subjects"), true), store.get(k("kb"), true),
-    ]);
-    setTasks(t || []); setMaterials(mats || []); setComments(cm || []); setCompletions(comp || {}); setAnnouncements(ann || []); setWeeklies(wk || []);
-    setProofs(pr || {}); setGroups(gr || []); setSubjectDefs(sj || []); setKb(kbv || {});
+    const names = ["tasks", "comments", "completions", "announcements", "weeklies", "proofs", "groups", "subjects"];
+    const stamp = progressStamp.current;
+    // Three requests at once (it used to be eleven, one after another): the small shared rows plus this student's progress,
+    // a short summary of every note (no text), and the class list. If one of them fails, that part keeps what the screen
+    // already shows instead of going blank.
+    const [kv, mats, cls] = await Promise.all([store.getMany([...names.map(k), `u:${u}:progress`]), notes.list(cid), store.classes.list()]);
+    if (cls) setClasses(cls);
+    if (mats) setMaterials(mats);
+    if (kv) {
+      const g = (x) => kv[k(x)];
+      setTasks(g("tasks") || []); setComments(g("comments") || []); setCompletions(g("completions") || {}); setAnnouncements(g("announcements") || []);
+      setWeeklies(g("weeklies") || []); setProofs(g("proofs") || {}); setGroups(g("groups") || []); setSubjectDefs(g("subjects") || []);
+      // progress made on another device shows up here, unless this device has a change of its own on the way
+      const prog = kv[`u:${u}:progress`];
+      if (prog && typeof prog === "object" && !progressBusy.current && progressStamp.current === stamp && JSON.stringify(prog) !== JSON.stringify(progressRef.current)) {
+        progressRef.current = prog; setProgress(prog);
+      }
+    }
   };
 
   const refresh = useCallback(async (force = false) => {
@@ -5498,7 +5820,7 @@ export default function App() {
       }
       if (cache && cid) {
         // Instant open: show what we had last time, then quietly catch up.
-        setTasks(cache.tasks || []); setMaterials(cache.materials || []); setComments(cache.comments || []);
+        setTasks(cache.tasks || []); setMaterials(cache.v === 28 ? cache.materials || [] : []); setComments(cache.comments || []);
         setCompletions(cache.completions || {}); setAnnouncements(cache.announcements || []); setWeeklies(cache.weeklies || []);
         setProofs(cache.proofs || {}); setGroups(cache.groups || []); setSubjectDefs(cache.subjects || []);
         setReady(true);
@@ -5533,7 +5855,7 @@ export default function App() {
 
   useEffect(() => {
     if (!user || !ready) return;
-    const id = setTimeout(() => store.set(`cache:${user}`, { tasks, materials, comments, completions, announcements, weeklies, proofs, groups, subjects: subjectDefs }), 900);
+    const id = setTimeout(() => store.set(`cache:${user}`, { v: 28, tasks, materials, comments, completions, announcements, weeklies, proofs, groups, subjects: subjectDefs }), 900);
     return () => clearTimeout(id);
   }, [tasks, materials, comments, completions, announcements, weeklies, proofs, groups, subjectDefs, user, ready]);
 
@@ -5593,15 +5915,17 @@ export default function App() {
   }, []);
 
   /* ----- export: a plain JSON copy of the person's own statuses and notes ----- */
-  const exportMyData = () => {
+  const exportMyData = async () => {
     try {
+      const mine = materials.filter((m) => m.mine);
+      const bodies = await notes.text(mine.map((m) => m.id));
       const data = {
         app: "homeroom", schema: 1, exportedAt: new Date().toISOString(), user, class: classLabel,
         tasks: tasks.map((t) => ({
           title: t.title, subject: t.subject, type: t.type, priority: t.priority, quarter: t.quarter || null,
           deadline: t.deadline, notes: t.notes || "", myStatus: progress[t.id] || "todo",
         })),
-        myNotes: materials.filter((m) => m.by === user).map((m) => ({ title: m.title, taskId: m.taskId, text: m.text || "" })),
+        myNotes: mine.map((m) => ({ title: m.title, subject: m.subject, topic: m.topic, taskId: m.taskId, text: bodies[m.id] || "" })),
       };
       const url = URL.createObjectURL(new Blob([JSON.stringify(data, null, 2)], { type: "application/json" }));
       const a = document.createElement("a");
@@ -5618,10 +5942,12 @@ export default function App() {
   /* ----- auth ----- */
 
   const chooseClass = async (cid) => {
-    await supabase.from("profiles").update({ class_id: cid }).eq("username", user);
+    const { error: classErr } = await supabase.rpc("choose_class", { cls: cid, code: joinCode.value || null });
+    if (classErr) { const m = codeError(classErr.message) || "Couldn't join that class just now. Try again in a moment."; showToast(m); return m; }
+    joinCode.value = "";
     store.del(`cache:${user}`);
     classRef.current = cid; setClassId(cid);
-    setTasks([]); setMaterials([]); setComments([]); setCompletions({}); setAnnouncements([]); setWeeklies([]); setProofs({}); setGroups([]); setSubjectDefs([]); setKb({});
+    setTasks([]); setMaterials([]); setComments([]); setCompletions({}); setAnnouncements([]); setWeeklies([]); setProofs({}); setGroups([]); setSubjectDefs([]); notes.clear();
     backfilled.current = false;
     setSyncing(true);
     try { await loadShared(user, cid); } finally { setSyncing(false); }
@@ -5641,8 +5967,9 @@ export default function App() {
 
   // The boarding pass: save the username and class, then (after the stamp and the tear) take off.
   const submitPass = async (u, cid) => {
-    const { error } = await supabase.rpc("complete_profile", { uname: u, cls: cid });
-    if (!error) { await writeOnboardingFlag(supabase, false); return null; } // "in onboarding" from the moment the ticket is stamped
+    const { error } = await supabase.rpc("complete_profile", { uname: u, cls: cid, code: joinCode.value || null });
+    if (!error) { joinCode.value = ""; await writeOnboardingFlag(supabase, false); return null; }
+    if (codeError(error.message)) return codeError(error.message); // "in onboarding" from the moment the ticket is stamped
     if (/duplicate|unique/i.test(error.message)) return "Someone already has that name. Try another.";
     if (/already set up/i.test(error.message)) return "This account already has a boarding pass. Sign out and sign back in.";
     return "Couldn't save your pass: " + error.message;
@@ -5714,7 +6041,7 @@ export default function App() {
     await supabase.auth.signOut(); setIsAdmin(false);
     Sound.stopMusic();
     setUser(null); setMenu(false); setTab("tasks"); sendOb(EVENT.RESET); obChecked.current = false; setUnbox(null);
-    setTasks([]); setMaterials([]); setComments([]); setCompletions({}); setAnnouncements([]); setWeeklies([]); setProofs({}); setGroups([]); setSubjectDefs([]); setKb({});
+    setTasks([]); setMaterials([]); setComments([]); setCompletions({}); setAnnouncements([]); setWeeklies([]); setProofs({}); setGroups([]); setSubjectDefs([]); notes.clear();
     backfilled.current = false;
   };
 
@@ -5722,7 +6049,7 @@ export default function App() {
 
   const mutate = async (key, setter, fn, empty = []) => {
     setter((c) => fn(c));
-    const fk = ["tasks", "materials", "comments", "completions", "announcements", "weeklies", "proofs", "groups", "subjects", "kb"].includes(key) ? `${classRef.current}:${key}` : key;
+    const fk = ["tasks", "comments", "completions", "announcements", "weeklies", "proofs", "groups", "subjects"].includes(key) ? `${classRef.current}:${key}` : key;
     const ok = await store.update(fk, fn, empty);
     setSyncErr(!ok);
   };
@@ -5765,13 +6092,40 @@ export default function App() {
   };
   const saveWeekly = (weekStart, text) =>
     mutate("weeklies", setWeeklies, (c) => [...c.filter((w) => w.weekStart !== weekStart), { id: uid(), weekStart, text, by: user, at: Date.now() }]);
-  const addMaterial = (m) => mutate("materials", setMaterials, (c) => [...c, m]);
-  const saveKb = (id, entry) => mutate("kb", setKb, (c) => ({ ...c, [id]: entry }), {});
-  const removeMaterial = (id) => {
+  // ----- notes (their own tables, see lib/notes.js) -----
+  const markInventory = (id, entry) => setMaterials((c) => c.map((m) => (m.id === id ? { ...m, ic: entry.ideas.length, src: entry.src } : m)));
+  // Saves a note, then reads it into its ideas inventory right away so classmates (and the assistant) can use it at once.
+  const addNote = async (n) => {
+    const id = n.id || uid();
+    const subject = (n.subject || "").trim() || "General";
+    const topic = normTopic(n.topic);
+    const text = String(n.text || "").slice(0, MAX_BODY);
+    const ok = await notes.add({ id, classId: classRef.current, author: user, subject, topic, title: n.title, text, kind: n.kind || "upload", taskId: n.taskId, taskTitle: n.taskTitle });
+    if (!ok) { setSyncErr(true); return false; }
+    ensureSubject(subject);
+    const meta = { id, taskId: n.taskId || null, title: String(n.title || "Untitled notes").slice(0, 120), by: user, kind: n.kind || "upload", at: Date.now(), subject, topic, taskTitle: n.taskTitle || "", n: text.length, ic: 0, src: null, mine: true, orphan: false };
+    setMaterials((c) => [meta, ...c.filter((x) => x.id !== id)]);
+    if (meta.kind !== "ai") {
+      Sound.play("add");
+      if (n.onProgress) n.onProgress("Reading your notes");
+      try { await ensureInventory([{ m: meta, subject }], markInventory, null, null); } catch { /* saved; it is read the first time someone studies it */ }
+    }
+    return true;
+  };
+  const relabelMaterial = async (id, patch) => {
+    const ok = await notes.relabel(id, patch);
+    if (ok) { ensureSubject(patch.subject); setMaterials((c) => c.map((m) => (m.id === id ? { ...m, ...patch, topic: normTopic(patch.topic) } : m))); }
+    return ok;
+  };
+  const removeMaterial = async (id) => {
     const m = materials.find((x) => x.id === id);
-    mutate("materials", setMaterials, (c) => c.filter((x) => x.id !== id));
+    if (!m) return;
+    const body = (await notes.text([id]))[id] || ""; // kept so Undo can put it back
+    const ok = await notes.remove(id);
+    if (!ok) { showToast("Couldn't remove that just now. Only the person who added it can."); return; }
+    setMaterials((c) => c.filter((x) => x.id !== id));
     Sound.play("rip");
-    if (m) showToast("Material removed", () => addMaterial(m));
+    showToast("Material removed", () => addNote({ id, title: m.title, text: body, subject: m.subject, topic: m.topic, kind: m.kind, taskId: m.taskId, taskTitle: m.taskTitle }));
   };
   const addComment = (taskId, text) => {
     Sound.play("send");
@@ -5833,7 +6187,12 @@ export default function App() {
     setProgress(next);
     Sound.play(s === "done" ? "done" : s === "progress" ? "pop" : "undo");
     if (s === "done" && navigator.vibrate) navigator.vibrate([8, 50, 16]);
-    store.set(`u:${user}:progress`, next, true).then((ok) => setSyncErr(!ok)).catch(() => setSyncErr(true));
+    // Only this one task's status is written, merged into whatever is saved, so ticking on a phone can't erase a tick from a laptop.
+    progressStamp.current++; progressBusy.current++;
+    progressQ.current = progressQ.current
+      .then(() => store.update(`u:${user}:progress`, (c) => ({ ...(c && typeof c === "object" ? c : {}), [id]: s }), {}))
+      .then((ok) => setSyncErr(!ok), () => setSyncErr(true))
+      .finally(() => { progressBusy.current--; });
     if (s === "done" || prev === "done") markCompletion(id, s === "done");
     if (s === "done") logActivity();
     if (s === "done") {
@@ -6049,11 +6408,11 @@ export default function App() {
               editTask={(id) => { const t = tasks.find((x) => x.id === id); if (t) setForm({ mode: "edit", task: t }); }} onRefresh={() => refresh(true)} />
           )}
           {tab === "review" && (
-            <ReviewTab tasks={tasks} progress={progress} materials={materials} weeklies={weeklies} saveWeekly={saveWeekly} reviewStart={reviewStart} clearStart={() => setReviewStart(null)} user={user} addMaterial={addMaterial}
-              removeMaterial={removeMaterial} focusId={reviewFocus} clearFocus={() => setReviewFocus(null)} onRefresh={() => refresh(true)} subjects={subjects} kb={kb} saveKb={saveKb} classQuarter={classQuarter}
+            <ReviewTab tasks={tasks} progress={progress} materials={materials} weeklies={weeklies} saveWeekly={saveWeekly} reviewStart={reviewStart} clearStart={() => setReviewStart(null)} user={user} addNote={addNote}
+              removeMaterial={removeMaterial} relabelMaterial={relabelMaterial} onAddSubject={setSubject} focusId={reviewFocus} clearFocus={() => setReviewFocus(null)} onRefresh={() => refresh(true)} subjects={subjects} onInventory={markInventory} classQuarter={classQuarter}
               onSaved={(ok) => setSyncErr(!ok)} />
           )}
-          {tab === "ask" && <AskTab user={user} tasks={tasks} materials={materials} progress={progress} kb={kb} addTask={(t) => { Sound.play("add"); addTask({ quarter: defQuarter, ...t }); }} />}
+          {tab === "ask" && <AskTab user={user} tasks={tasks} materials={materials} progress={progress} addTask={(t) => { Sound.play("add"); addTask({ quarter: defQuarter, ...t }); }} />}
           </ErrorBoundary>
         </div>
         {tab === "tasks" && (
@@ -6138,7 +6497,7 @@ export default function App() {
         {searchOpen && (
           <SearchPanel tasks={tasks} materials={materials}
             onTask={(id) => { setSearchOpen(false); setConfirmDel(false); setDetailId(id); }}
-            onMaterial={(m) => { setSearchOpen(false); setReviewFocus(m.taskId); setTab("review"); }} />
+            onMaterial={(m) => { setSearchOpen(false); if (m.taskId && tasks.some((t) => t.id === m.taskId)) setReviewFocus(m.taskId); else setReviewStart({ section: "library" }); setTab("review"); }} />
         )}
       </Sheet>
       <Sheet open={menu} onClose={() => setMenu(false)} title="Account">

@@ -115,3 +115,32 @@ test("a failed shared save answers false (never throws), so the app can show its
     assert.equal(db.rows.has("u:me:progress"), false, "nothing was saved");
   }
 });
+
+test("getMany reads several shared rows in one request, and says null when the database can't be reached", async () => {
+  const seen = [];
+  const ok = { from: (t) => ({ select: () => ({ in: async (c, keys) => { seen.push([t, c, keys]); return { data: [{ key: "a", value: 1 }, { key: "c", value: [2] }], error: null }; } }) }) };
+  const out = await createStore(ok).getMany(["a", "b", "c"]);
+  assert.deepEqual(out, { a: 1, c: [2] }); // "b" was never saved, so it is simply absent
+  assert.deepEqual(seen, [["kv", "key", ["a", "b", "c"]]]);
+  const bad = { from: () => ({ select: () => ({ in: async () => ({ data: null, error: { message: "x" } }) }) }) };
+  const orig = console.error; console.error = () => {};
+  try { assert.equal(await createStore(bad).getMany(["a"]), null); } finally { console.error = orig; }
+});
+
+test("get tells 'nothing saved yet' (null) apart from 'couldn't reach the database' (undefined)", async () => {
+  const mk = (res) => ({ from: () => ({ select: () => ({ eq: () => ({ maybeSingle: async () => res }) }) }) });
+  assert.equal(await createStore(mk({ data: null, error: null })).get("k", true), null);
+  assert.deepEqual(await createStore(mk({ data: { value: { a: 1 } }, error: null })).get("k", true), { a: 1 });
+  const orig = console.error; console.error = () => {};
+  try { assert.equal(await createStore(mk({ data: null, error: { message: "x" } })).get("k", true), undefined); } finally { console.error = orig; }
+});
+
+test("the class list asks for 'locked' (v29) and still works on a database that doesn't have it yet", async () => {
+  const asked = [];
+  const mk = (failFirst) => ({ from: () => ({ select: (cols) => ({ order: async () => { asked.push(cols); const bad = failFirst > 0 && asked.length <= failFirst; return bad ? { data: null, error: { message: "no column" } } : { data: [{ id: "8-16", label: "8-16" }], error: null }; } }) }) });
+  assert.equal((await createStore(mk(0)).classes.list()).length, 1);
+  assert.match(asked[0], /locked/);
+  asked.length = 0;
+  assert.equal((await createStore(mk(2)).classes.list()).length, 1); // fell back twice, to the v8 columns
+  assert.deepEqual(asked.map((c) => c.includes("locked") ? "locked" : c.includes("quarter") ? "quarter" : "base"), ["locked", "quarter", "base"]);
+});

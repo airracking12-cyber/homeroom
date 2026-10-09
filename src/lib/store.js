@@ -12,11 +12,25 @@ export function createStore(supabase, storage = globalThis.localStorage) {
       if (!shared) {
         try { const v = storage.getItem(LS + key); return v ? JSON.parse(v) : null; } catch { return null; }
       }
+      // null means "nothing saved here yet"; undefined means "couldn't reach the database", so callers keep what they have
+      // instead of treating a hiccup as an empty list.
       try {
         const { data, error } = await supabase.from("kv").select("value").eq("key", key).maybeSingle();
-        if (error) { console.error("kv get failed", error); return null; }
+        if (error) { console.error("kv get failed", error); return undefined; }
         return data ? data.value : null;
-      } catch { return null; }
+      } catch { return undefined; }
+    },
+    // Several shared rows in one request (start-up used to make one request per row). Returns { key: value } with
+    // missing keys left out, or null if the database couldn't be reached.
+    async getMany(keys) {
+      if (!keys.length) return {};
+      try {
+        const { data, error } = await supabase.from("kv").select("key,value").in("key", keys);
+        if (error) { console.error("kv getMany failed", error); return null; }
+        const out = {};
+        for (const r of data || []) out[r.key] = r.value;
+        return out;
+      } catch (e) { console.error("kv getMany failed", e); return null; }
     },
     async set(key, val, shared = false) {
       if (!shared) {
@@ -53,8 +67,9 @@ export function createStore(supabase, storage = globalThis.localStorage) {
     },
     classes: {
       async list() {
-        let r = await supabase.from("classes").select("id,year,name,label,quarter").order("label");
-        if (r.error) r = await supabase.from("classes").select("id,year,name,label").order("label"); // database not upgraded to v8 yet: still show the classes
+        let r = await supabase.from("classes").select("id,year,name,label,quarter,locked").order("label"); // locked: the class asks for a code (v29)
+        if (r.error) r = await supabase.from("classes").select("id,year,name,label,quarter").order("label"); // not upgraded to v29 yet
+        if (r.error) r = await supabase.from("classes").select("id,year,name,label").order("label"); // not upgraded to v8 yet: still show the classes
         return r.data || [];
       },
       async add(c) {

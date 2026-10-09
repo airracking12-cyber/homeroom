@@ -21,8 +21,11 @@ export async function onRequestPost({ request, env, params }) {
       }
     } catch (err) { console.warn("[ai] rate limiter unavailable, allowing the request:", err); }
   }
+  // Text and one photo or PDF of up to 10 MB (a little more once it is wrapped as base64). Refuse bigger ones before reading them.
+  const MAX_BODY = 16 * 1024 * 1024;
+  if (Number(request.headers.get("Content-Length")) > MAX_BODY) return new Response("Too large", { status: 413 });
   let body = await request.arrayBuffer();
-  if (body.byteLength > 30 * 1024 * 1024) return new Response("Too large", { status: 413 });
+  if (body.byteLength > MAX_BODY) return new Response("Too large", { status: 413 });
   // Only the app's own settings are allowed through: the model is chosen here, and output length is capped.
   try {
     const j = JSON.parse(new TextDecoder().decode(body));
