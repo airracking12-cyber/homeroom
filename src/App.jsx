@@ -6,7 +6,10 @@ import { pad, toISO, todayISO, parse, addDays, diffDays, fmtDate, todayLong, rel
 import { setAuthHeaders, callClaude, streamClaude, parseJSON } from "./lib/ai.js";
 import { SUBJ, SUBJ_REG, subjColor, SWATCHES, EMAIL_RE, TYPES, REVIEW_TYPES, QUARTERS, MAX_PROOF, needsProofType, wantsProof, PRIORITIES, STATUSES, DEFAULT_SUBJECTS, statusLabel } from "./lib/constants.js";
 import { LS, createStore } from "./lib/store.js";
+import { Sound } from "./lib/sound.js";
 import { createNotes, normTopic, matchTopic, topicList, MAX_BODY } from "./lib/notes.js";
+import { parseReviewer } from "./lib/reviewerDoc.js";
+import { groupBySubject, libraryStats, untopiced, fmtBytes, scopeLine, NO_TOPIC } from "./lib/library.js";
 import { createDebouncedSaver } from "./lib/debounce.js";
 import Onboarding from "./onboarding/Onboarding.jsx";
 import PlaneFlight from "./onboarding/PlaneFlight.jsx";
@@ -14,6 +17,9 @@ import { PHASE, EVENT, reduce as reduceOnboarding, onboardingNeeded } from "./on
 import { readOnboardingFlag, writeOnboardingFlag } from "./onboarding/flag.js";
 import { REDESIGN_CSS } from "./design/redesign.css.js";
 import { OB_CSS } from "./onboarding/onboarding.css.js";
+import { V30_CSS } from "./design/v30.css.js";
+import { UNBOX_LOOK_CSS } from "./design/unbox.css.js";
+import { V31_CSS } from "./design/v31.css.js";
 import { useState, useEffect, useLayoutEffect, useMemo, useReducer, useRef, useCallback } from "react";
 import {
   Plus, Check, X, ChevronLeft, ChevronRight, ArrowUp, Upload, Sparkles, Trash2,
@@ -22,6 +28,7 @@ import {
   Camera, FolderPlus, Folder, BadgeCheck, RotateCcw, Flame, Timer, Play, Pause, Columns3, SlidersHorizontal,
   Lightbulb, CircleAlert, LogOut, Sun, Moon, Hourglass, Target, Inbox, Plane,
   CheckCheck, GraduationCap, Lock,
+  Layers, TextCursorInput, Shuffle, Brain, ArrowRight, Download, FileText, FileUp, NotebookPen, Database,
 } from "lucide-react";
 
 /* ───────────────────────── tokens (CSS variables, so dark mode just works) ───────────────────────── */
@@ -100,7 +107,7 @@ async function copyText(text) {
   } catch { return false; }
 }
 
-/* ───────────────────────── sound: effects and a little generative lo-fi, all synthesized ───────────────────────── */
+/* ───────────────────────── sound ───────────────────────── */
 
 // A tiny haptic tick on phones when you press the main controls. Silently ignored where unsupported.
 if (typeof document !== "undefined" && navigator.vibrate) {
@@ -109,130 +116,7 @@ if (typeof document !== "undefined" && navigator.vibrate) {
   }, { passive: true });
 }
 
-const Sound = (() => {
-  let ctx = null, master = null, musicBus = null, noise = null;
-  let sfxOn = true, musicOn = false, vol = 0.5, timer = null, step = 0, nextTime = 0;
-  const EIGHTH = 60 / 72 / 2;
-  const CHORDS = [[130.81, 164.81, 196.0, 246.94], [110.0, 130.81, 164.81, 196.0], [146.83, 174.61, 220.0, 261.63], [98.0, 123.47, 146.83, 174.61]];
-  const ROOTS = [65.41, 55.0, 73.42, 49.0];
-  const PENT = [523.25, 587.33, 659.25, 783.99, 880.0, 1046.5];
-
-  const ensure = () => {
-    if (!ctx) {
-      const AC = window.AudioContext || window.webkitAudioContext;
-      if (!AC) return null;
-      ctx = new AC();
-      master = ctx.createGain(); master.gain.value = 1; master.connect(ctx.destination);
-      musicBus = ctx.createGain(); musicBus.gain.value = 0;
-      const lp = ctx.createBiquadFilter(); lp.type = "lowpass"; lp.frequency.value = 2600;
-      musicBus.connect(lp); lp.connect(master);
-      noise = ctx.createBuffer(1, ctx.sampleRate, ctx.sampleRate);
-      const d = noise.getChannelData(0);
-      for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
-    }
-    if (ctx.state === "suspended") ctx.resume();
-    return ctx;
-  };
-
-  const tone = (f, t, dur, o = {}) => {
-    const { type = "sine", vol: v = 0.1, attack = 0.012, dest = master, lp } = o;
-    const osc = ctx.createOscillator(), g = ctx.createGain();
-    osc.type = type; osc.frequency.setValueAtTime(f, t);
-    g.gain.setValueAtTime(0.0001, t);
-    g.gain.exponentialRampToValueAtTime(v, t + attack);
-    g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
-    osc.connect(g);
-    let out = g;
-    if (lp) { const fl = ctx.createBiquadFilter(); fl.type = "lowpass"; fl.frequency.value = lp; g.connect(fl); out = fl; }
-    out.connect(dest);
-    osc.start(t); osc.stop(t + dur + 0.05);
-  };
-
-  const hit = (t, dur, v, hp) => {
-    const s = ctx.createBufferSource(); s.buffer = noise;
-    const f = ctx.createBiquadFilter(); f.type = "highpass"; f.frequency.value = hp;
-    const g = ctx.createGain(); g.gain.setValueAtTime(v, t); g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
-    s.connect(f); f.connect(g); g.connect(musicBus); s.start(t); s.stop(t + dur + 0.02);
-  };
-
-  const kick = (t) => {
-    const o = ctx.createOscillator(), g = ctx.createGain();
-    o.frequency.setValueAtTime(120, t); o.frequency.exponentialRampToValueAtTime(42, t + 0.16);
-    g.gain.setValueAtTime(0.28, t); g.gain.exponentialRampToValueAtTime(0.0001, t + 0.22);
-    o.connect(g); g.connect(musicBus); o.start(t); o.stop(t + 0.25);
-  };
-
-  const schedule = () => {
-    while (nextTime < ctx.currentTime + 1.2) {
-      const bar = Math.floor(step / 8) % 4, s = step % 8;
-      const t = nextTime + (s % 2 === 1 ? 0.035 : 0);
-      if (s === 0) CHORDS[bar].forEach((f) => tone(f, t, EIGHTH * 8 + 0.4, { vol: 0.03, attack: 0.5, dest: musicBus, lp: 900 }));
-      if (s === 0 || s === 4) tone(ROOTS[bar], t, EIGHTH * 3, { vol: 0.1, attack: 0.02, dest: musicBus });
-      if (s === 0 || s === 5) kick(t);
-      if (s === 2 || s === 6) hit(t, 0.12, 0.05, 1800);
-      if (s % 2 === 1) hit(t, 0.04, 0.018, 7000);
-      if (Math.random() < 0.38) tone(PENT[Math.floor(Math.random() * PENT.length)], t, 0.9, { type: "triangle", vol: 0.045, dest: musicBus, lp: 2000 });
-      nextTime += EIGHTH; step++;
-    }
-  };
-
-  const grain = (t, dur, v, hp, lp) => {
-    const src = ctx.createBufferSource(); src.buffer = noise; src.loop = true;
-    const h = ctx.createBiquadFilter(); h.type = "highpass"; h.frequency.value = hp;
-    const l = ctx.createBiquadFilter(); l.type = "lowpass"; l.frequency.value = lp;
-    const g = ctx.createGain(); g.gain.setValueAtTime(0.0001, t);
-    g.gain.exponentialRampToValueAtTime(v, t + 0.006); g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
-    src.connect(h); h.connect(l); l.connect(g); g.connect(master);
-    src.start(t, Math.random() * 0.5); src.stop(t + dur + 0.02);
-  };
-  const thud = (t, f, v) => {
-    const o = ctx.createOscillator(), g = ctx.createGain();
-    o.frequency.setValueAtTime(f, t); o.frequency.exponentialRampToValueAtTime(f * 0.35, t + 0.14);
-    g.gain.setValueAtTime(v, t); g.gain.exponentialRampToValueAtTime(0.0001, t + 0.2);
-    o.connect(g); g.connect(master); o.start(t); o.stop(t + 0.24);
-  };
-
-  const SFX = {
-    tap: (t) => tone(760, t, 0.05, { type: "triangle", vol: 0.035 }),
-    done: (t) => { tone(523.25, t, 0.28, { vol: 0.09 }); tone(659.25, t + 0.08, 0.28, { vol: 0.09 }); tone(783.99, t + 0.16, 0.45, { vol: 0.1 }); },
-    undo: (t) => tone(392, t, 0.18, { type: "triangle", vol: 0.07 }),
-    add: (t) => { tone(587.33, t, 0.2, { vol: 0.08 }); tone(880, t + 0.08, 0.35, { vol: 0.08 }); },
-    send: (t) => tone(698.46, t, 0.12, { type: "triangle", vol: 0.06 }),
-    pop: (t) => tone(987.77, t, 0.18, { vol: 0.05 }),
-    err: (t) => { tone(233, t, 0.16, { type: "triangle", vol: 0.08 }); tone(185, t + 0.12, 0.25, { type: "triangle", vol: 0.08 }); },
-    bell: (t) => { tone(1318.5, t, 1.1, { vol: 0.08 }); tone(1975.5, t, 0.7, { vol: 0.03 }); tone(2637, t, 0.4, { vol: 0.015 }); },
-    // paper-and-stationery sounds
-    rip: (t) => grain(t, 0.09, 0.11, 1800 + Math.random() * 1200, 7500),
-    whoosh: (t) => grain(t, 0.26, 0.04, 500, 3200),
-    stamp: (t) => { thud(t, 150, 0.22); grain(t, 0.06, 0.07, 900, 4000); },
-    boxOpen: (t) => {
-      grain(t, 0.4, 0.09, 300, 5000); thud(t + 0.06, 110, 0.2);
-      tone(659.25, t + 0.28, 0.4, { vol: 0.07 }); tone(987.77, t + 0.36, 0.55, { vol: 0.07 }); tone(1318.5, t + 0.46, 0.8, { vol: 0.05 });
-    },
-    schoolbell: (t) => { [0, 0.2, 0.4, 0.6, 0.8, 1.0].forEach((d) => { tone(1568, t + d, 0.5, { vol: 0.07 }); tone(2349, t + d, 0.3, { vol: 0.025 }); }); },
-  };
-
-  return {
-    play(name) { if (!sfxOn || !ensure()) return; try { SFX[name] && SFX[name](ctx.currentTime + 0.001); } catch (err) { console.warn("[Homeroom] non-fatal:", err); } },
-    setSfx(v) { sfxOn = v; },
-    setVolume(v) { vol = v; if (ctx && musicBus) musicBus.gain.setTargetAtTime(musicOn ? vol * 0.9 : 0, ctx.currentTime, 0.1); },
-    startMusic() {
-      if (!ensure() || musicOn) return;
-      musicOn = true; step = 0; nextTime = ctx.currentTime + 0.1;
-      schedule(); timer = setInterval(schedule, 250);
-      musicBus.gain.cancelScheduledValues(ctx.currentTime);
-      musicBus.gain.setTargetAtTime(vol * 0.9, ctx.currentTime, 0.6);
-    },
-    stopMusic() {
-      if (!ctx || !musicOn) return;
-      musicOn = false; musicBus.gain.setTargetAtTime(0, ctx.currentTime, 0.25);
-      const tm = timer; timer = null; setTimeout(() => clearInterval(tm), 900);
-    },
-    isMusic: () => musicOn,
-    pause() { if (ctx && musicOn && ctx.state === "running") ctx.suspend(); },
-    resume() { if (ctx && musicOn && ctx.state === "suspended") ctx.resume(); },
-  };
-})();
+// (the sound player lives in ./lib/sound.js: rendered audio files, with the old synthesized sounds as a backup)
 
 /* ───────────────────────── files ───────────────────────── */
 
@@ -308,7 +192,7 @@ function buildContext(tasks, materials, progress, user, found) {
   const catalogue = materials.slice(0, 150).map((m) => `- "${m.title}" (${m.subject}${m.topic ? `, topic: ${m.topic}` : ""}${m.taskId ? `, for [${m.taskId}]` : ""}, by ${m.by})`).join("\n");
   const hits = (found || []).map((i) => `${i.subject}${i.topic ? ` / ${i.topic}` : ""} (from "${i.mt}"): ${i.t}: ${i.d}`).join("\n").slice(0, 20000);
   const mats = materials.length
-    ? `Notes the class has stored (titles only):\n${catalogue}\n\nIdeas from those notes that match this question:\n${hits || "(none matched. Say so, and suggest adding notes under Review > Library.)"}`
+    ? `Notes the class has stored (titles only):\n${catalogue}\n\nIdeas from those notes that match this question:\n${hits || "(none matched. Say so, and suggest adding notes in the Data tab.)"}`
     : "";
   return { today: todayLong(), list: list || "(no tasks yet)", mats: mats || "(no review material yet)" };
 }
@@ -320,12 +204,21 @@ function buildContext(tasks, materials, progress, user, found) {
    piece pops into its own spot the moment its token appears. Listed in the order the tour unwraps them. */
 const UNBOX_TOKENS = [
   "logo", "chip", "t-tasks", "hero", "quick", "views", "list", "side", "new",
-  "t-done", "p-done", "t-review", "p-review", "t-ask", "p-ask", "cabin", "search", "acct", "music",
+  "t-done", "p-done", "t-review", "p-review", "t-data", "p-data", "t-ask", "p-ask", "cabin", "search", "acct", "music",
 ];
-const UNBOX_CSS = UNBOX_TOKENS.map((t, k) =>
-  `.hr[data-unbox]:not([data-unbox~="${t}"]) [data-rv="${t}"]{visibility:hidden!important;opacity:0!important;pointer-events:none!important}` +
-  `.hr[data-unbox~="${t}"] [data-rv="${t}"]{animation:unboxPop 1s var(--ease) ${240 + ((k * 37) % 7) * 70}ms backwards}`
-).join("");
+// Big pieces are tied with the ribbon; the rest are plain tissue.
+const RIBBONED = new Set(["hero", "list", "side", "p-done", "p-review", "p-data", "p-ask"]);
+const unboxDelay = (t) => 240 + ((UNBOX_TOKENS.indexOf(t) * 37) % 7) * 70; // when a piece settles, after its paper starts to lift
+const UNBOX_CSS = UNBOX_TOKENS.map((t) => {
+  const sel = `.hr[data-unbox]:not([data-unbox~="${t}"]) [data-rv="${t}"]`;
+  return (
+    // not yet unwrapped: the piece keeps its size and place, but shows as paper, with everything on it out of sight
+    `${sel}{background:${RIBBONED.has(t) ? "var(--wrap-ribbon)" : "var(--wrap)"}!important;border-color:transparent!important;box-shadow:var(--wrap-sh)!important;color:transparent!important;-webkit-text-fill-color:transparent!important;pointer-events:none!important;backdrop-filter:none!important;-webkit-backdrop-filter:none!important;filter:none!important;animation:none!important}` +
+    `${sel} *{visibility:hidden!important}` +
+    `${sel}::before,${sel}::after{opacity:0!important}` +
+    `.hr[data-unbox~="${t}"] [data-rv="${t}"]{animation:unboxPop 1.2s var(--ease) ${unboxDelay(t)}ms backwards}`
+  );
+}).join("");
 
 const CSS = `
 *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
@@ -1522,7 +1415,7 @@ ${UNBOX_CSS}
 /* ── v12 form hint: says why Save is waiting ── */
 .formHint{margin:0 0 12px;color:var(--muted);font-size:14px}
 `;
-const STYLES = CSS + REDESIGN_CSS + OB_CSS; // the app's own styles, the redesign layer on top, then the onboarding styles
+const STYLES = CSS + REDESIGN_CSS + OB_CSS + V30_CSS + V31_CSS + UNBOX_LOOK_CSS; // the app's own styles, the redesign layer on top, the onboarding styles, then v30's central-tab layer
 
 /* ───────────────────────── small pieces ───────────────────────── */
 
@@ -1807,13 +1700,19 @@ const tourSteps = (bp, user) => [
     hint: "Open Review", done: (c) => c.tab === "review",
   },
   {
-    id: "study", target: "study-sections", enter: { tab: "review" },
+    id: "study", target: "study-scope", enter: { tab: "review" },
     title: "Choose what, then how",
-    body: "Pick Today, This week or Final, tap the subjects you want (or every subject), then a technique. Each card says what it is best for, so you don't have to guess.",
+    body: "Tap this bar to pick Today, This week or Final, and the subjects or topics you want. Then choose a technique below and press Start. Each one says what it is best for.",
     hint: "Try it, or tap Next",
   },
   {
-    id: "ask", target: "tab-ask", enter: { tab: "review" }, show: ["t-ask", "p-ask"],
+    id: "data", target: "tab-data", enter: { tab: "review" }, show: ["t-data", "p-data"],
+    title: "Your class's notes live in Data",
+    body: "Add your notes or a reviewer, tag the subject and topic, and the assistant finds them when you review. Everyone in your class can study from what is added.",
+    hint: "Open Data", done: (c) => c.tab === "data",
+  },
+  {
+    id: "ask", target: "tab-ask", enter: { tab: "data" }, show: ["t-ask", "p-ask"],
     title: "Ask the assistant",
     body: "Ask what's due, get a plan for tonight, or tell it to add a task for you.",
     hint: "Open Ask", done: (c) => c.tab === "ask",
@@ -1875,10 +1774,22 @@ function Tour({ user, bp, ctx, go, onDone, onReveal, mandatory }) {
   const calm = useRef(typeof window.matchMedia === "function" && window.matchMedia("(prefers-reduced-motion: reduce)").matches);
   const ctxRef = useRef(ctx); ctxRef.current = ctx;
   const goRef = useRef(go); goRef.current = go;
+  // the unboxing: sheets of paper that lift off pieces as they are unwrapped, pieces held back until their paper is in place,
+  // and the kraft lid that opens before anything else happens (only the first time through)
+  const [sheets, setSheets] = useState([]);
+  const [pending, setPending] = useState(() => new Set());
+  const [lidS, setLidS] = useState(() => (calm.current ? null : "closed")); // closed -> tape (label lifted) -> open -> gone
+  const layerRef = useRef(null);
 
   const toStep = (n) => {
     clearTimeout(timer.current);
     const k = Math.max(0, Math.min(last, n));
+    // pieces this step unwraps for the first time stay wrapped until their paper is placed (see the step effect)
+    if (k > reached && !calm.current) {
+      const have = new Set(steps.slice(0, reached + 1).flatMap((x) => x.show || []));
+      const add = (steps[k].show || []).filter((t) => !have.has(t));
+      if (add.length) setPending(new Set(add));
+    }
     setI(k);
     setReached((r) => Math.max(r, k));
   };
@@ -1889,7 +1800,8 @@ function Tour({ user, bp, ctx, go, onDone, onReveal, mandatory }) {
     steps.slice(0, reached + 1).forEach((x) => (x.show || []).forEach((t) => set.add(t)));
     return [...set];
   }, [steps, reached]);
-  useLayoutEffect(() => { onReveal(pieces); }, [pieces]);
+  const unwrapped = useMemo(() => (pending.size ? pieces.filter((t) => !pending.has(t)) : pieces), [pieces, pending]);
+  useLayoutEffect(() => { onReveal(unwrapped); }, [unwrapped]);
 
   // entering a step puts the app in the state the step needs (so Back and Skip always work)
   useEffect(() => {
@@ -1900,18 +1812,54 @@ function Tour({ user, bp, ctx, go, onDone, onReveal, mandatory }) {
     const before = new Set(steps.slice(0, i).flatMap((x) => x.show || []));
     const added = (step.show || []).filter((t) => !before.has(t));
     const onScreen = (t) => [...document.querySelectorAll(`[data-rv="${t}"]`)].find((e) => { const r = e.getBoundingClientRect(); return r.width > 0 && r.height > 0; });
-    const fresh = i > seen.current && added.some(onScreen);
+    // a step that switches tabs brings its pieces with it a moment later, so count those as new too
+    const fresh = i > seen.current && added.length > 0 && (added.some(onScreen) || !!step.enter?.tab);
     seen.current = Math.max(seen.current, i);
-    // new pieces get a slow unwrapping with the lights up; steps that only change the view get a short pause
-    const R = calm.current ? 0 : fresh ? (finale ? 2300 : 1500) : i === 0 ? 0 : 450;
+    const intro = i === 0 && lidS === "closed" && !calm.current; // the lid state itself says whether it has opened yet (an effect that runs twice must not use up a flag)
+    // new pieces get a slow unwrapping with the lights up; steps that only change the view get a short pause; the very first
+    // step waits for the lid
+    const R = calm.current ? 0 : intro ? 3000 : fresh ? (finale ? 3300 : 2400) : i === 0 ? 0 : 450;
     setPh(R ? "reveal" : "show");
+    setSheets([]);
     const ts = [];
     const at = (fn, ms) => { ts.push(setTimeout(fn, ms)); };
     if (R) at(() => setPh("show"), R);
     at(() => setSettled(true), R + 900);
-    Sound.play(i === 0 ? "pop" : "whoosh");
+    if (intro) {
+      at(() => { setLidS("tape"); Sound.play("rip"); }, 950);
+      at(() => { setLidS("open"); Sound.play("boxOpen"); }, 1400);
+      at(() => setLidS(null), 3050);
+      at(() => Sound.play("pop"), R);
+    } else {
+      Sound.play(i === 0 ? "pop" : "whoosh");
+    }
+    if (fresh && calm.current) setPending(new Set());
+    if (fresh && !calm.current) {
+      // lay a sheet of paper over each new piece (the piece is still wrapped under it), then let the piece out and lift the paper
+      const placed = new WeakSet();
+      let n = 0;
+      const place = () => {
+        const out = [];
+        added.forEach((t) => document.querySelectorAll(`[data-rv="${t}"]`).forEach((el) => {
+          if (placed.has(el) || out.length + n >= 14) return;
+          const r = el.getBoundingClientRect();
+          if (r.width < 6 || r.height < 6 || r.bottom <= 0 || r.top >= window.innerHeight || r.right <= 0 || r.left >= window.innerWidth) return;
+          placed.add(el);
+          const cs = getComputedStyle(el);
+          const rad = cs.borderTopLeftRadius;
+          out.push({ k: `${t}:${n + out.length}`, el, big: RIBBONED.has(t), r: rad.includes("%") ? Math.min(r.width, r.height) / 2 : parseFloat(rad) || 0, d: Math.max(0, unboxDelay(t) - 200) + out.length * 60 });
+        }));
+        n += out.length;
+        if (out.length) setSheets((c) => [...c, ...out]);
+        return out.length;
+      };
+      at(() => { const k = place(); setPending(new Set()); if (k && !finale) Sound.play("rip"); }, 110);
+      at(place, 380);
+      at(() => setSheets([]), R + 600);
+      if (finale) at(() => Sound.play("rip"), 350);
+    }
     if (fresh) {
-      at(() => Sound.play(finale ? "boxOpen" : "pop"), 340);
+      at(() => Sound.play(finale ? "boxOpen" : "pop"), 640);
       if (!finale && !calm.current) {
         at(() => {
           const spots = [];
@@ -1922,8 +1870,8 @@ function Tour({ user, bp, ctx, go, onDone, onReveal, mandatory }) {
             spots.push({ k: t, x: Math.round(r.left + r.width / 2), y: Math.round(r.top + Math.min(r.height / 2, 90)) });
           });
           setBits(spots);
-        }, 380);
-        at(() => setBits([]), 1900);
+        }, 760);
+        at(() => setBits([]), 2200);
       }
     }
     if (finale) { at(() => Sound.play("stamp"), R + 150); at(() => Sound.play("bell"), R + 420); }
@@ -1979,6 +1927,25 @@ function Tour({ user, bp, ctx, go, onDone, onReveal, mandatory }) {
     return () => { window.removeEventListener("resize", onResize); window.removeEventListener("keydown", onKey, true); };
   }, [onDone, mandatory]);
 
+  useEffect(() => {
+    if (!sheets.length) return undefined;
+    let raf;
+    const tick = () => {
+      const layer = layerRef.current;
+      if (layer) {
+        sheets.forEach((sh) => {
+          const node = layer.querySelector(`[data-sid="${sh.k}"]`);
+          if (!node || !sh.el.isConnected) return;
+          const r = sh.el.getBoundingClientRect();
+          node.style.left = r.left + "px"; node.style.top = r.top + "px"; node.style.width = r.width + "px"; node.style.height = r.height + "px";
+        });
+      }
+      raf = requestAnimationFrame(tick);
+    };
+    tick();
+    return () => cancelAnimationFrame(raf);
+  }, [sheets]);
+
   useLayoutEffect(() => {
     const h = cardRef.current ? cardRef.current.offsetHeight : 0;
     if (h && Math.abs(h - cardH) > 1) setCardH(h);
@@ -2025,6 +1992,19 @@ function Tour({ user, bp, ctx, go, onDone, onReveal, mandatory }) {
       {blocks.map((b, k) => <div key={k} className="tourBlock" style={b} />)}
       <div className="tourHole" data-ok={ok ? 1 : 0} data-none={!rect || step.center ? 1 : 0}
         style={{ left: hole.x, top: hole.y, width: hole.w, height: hole.h, borderRadius: hole.r }} />
+      <div ref={layerRef} aria-hidden="true">
+        {sheets.map((sh) => {
+          const r = sh.el.getBoundingClientRect();
+          return <i key={sh.k} data-sid={sh.k} className="tourSheet" data-big={sh.big ? 1 : 0} style={{ left: r.left, top: r.top, width: r.width, height: r.height, "--r": sh.r + "px", "--d": sh.d + "ms" }} />;
+        })}
+      </div>
+      {lidS && (
+        <div className="tourLid" data-s={lidS} aria-hidden="true">
+          <div className="lidHalf lidL" />
+          <div className="lidHalf lidR" />
+          <div className="lidLabel"><b>Homeroom</b><small>For {user} &middot; Handle with care</small><i /></div>
+        </div>
+      )}
       {bits.map((b) => (
         <div key={b.k} className="tourBurst" style={{ left: b.x, top: b.y }} aria-hidden="true">
           {Array.from({ length: 9 }, (_, k) => {
@@ -3148,6 +3128,7 @@ function ShortcutList() {
     [["g", "t"], "Go to Tasks"],
     [["g", "d"], "Go to Done"],
     [["g", "r"], "Go to Review"],
+    [["g", "l"], "Go to Data"],
     [["g", "a"], "Go to Ask"],
     [["j"], "Next task in the list"],
     [["k"], "Previous task in the list"],
@@ -3269,9 +3250,51 @@ function SearchPanel({ tasks, materials, onTask, onMaterial }) {
 
 /* ───────────────────────── review ───────────────────────── */
 
-/* ───────────────────────── notes: add, open, edit ─────────────────────────
-   One "add notes" sheet is used both on a task's review page and in the Library. Every note gets a subject and a topic,
-   and is read into its ideas inventory right away, so the Study tab and the assistant can find the right lesson later. */
+/* ───────────────────────── v30: shared bits ───────────────────────── */
+
+function PageHead({ eyebrow, title, lede, right }) {
+  return (
+    <header className="v3-head">
+      <div>
+        {eyebrow && <span className="v3-eyebrow">{eyebrow}</span>}
+        <h1 className="h1">{title}</h1>
+        {lede && <p className="v3-lede">{lede}</p>}
+      </div>
+      {right}
+    </header>
+  );
+}
+
+const kindMeta = (m) => (m.kind === "ai" ? { label: "Assistant", Icon: Sparkles } : m.kind === "reviewer" ? { label: "Reviewer", Icon: NotebookPen } : { label: "Notes", Icon: FileText });
+const TECH_ICON = { cards: Layers, cloze: TextCursorInput, match: Shuffle, mnemonic: Lightbulb, teach: GraduationCap, blurt: Brain, quiz: ListChecks, exam: Timer, plan: CalendarDays };
+
+// A reviewer laid out properly: headings, term and meaning rows, short points. Plain text in, nothing dropped (see lib/reviewerDoc.js).
+function ReviewerDoc({ text, live }) {
+  const sections = useMemo(() => parseReviewer(text), [text]);
+  if (!sections.length) return null;
+  // a first line with nothing under it is the reviewer's title, shown above the cards rather than as an empty one
+  const titled = sections.length > 1 && sections[0].title && sections[0].items.length === 0;
+  const body = titled ? sections.slice(1) : sections;
+  return (
+    <article className="v3-doc" data-live={live ? 1 : 0}>
+      {titled && <h2 className="v3-docTitle serif">{sections[0].title}</h2>}
+      {body.map((s, i) => (
+        <section className="v3-docSec" key={i}>
+          {s.title && <h3 className="v3-docH">{s.title}</h3>}
+          {s.items.map((it, j) => (it.type === "term"
+            ? <div className="v3-term" key={j}><b>{it.term}</b><span>{it.meaning}</span></div>
+            : it.type === "point" ? <p className="v3-point" key={j}>{it.text}</p>
+              : <p className="v3-para" key={j}>{it.text}</p>))}
+        </section>
+      ))}
+    </article>
+  );
+}
+
+/* ───────────────────────── add notes ─────────────────────────
+   One sheet for everything a student shares: class notes or a reviewer they made. Files are read into editable text
+   (PDFs and photos by the assistant); a single file also keeps its original in the class's storage. The subject and
+   topic are what let the assistant find the right lessons later. */
 
 const FILE_MAX = 10 * 1024 * 1024; // the assistant reads PDFs and photos up to this size
 
@@ -3284,17 +3307,20 @@ async function suggestTopic(text, subject) {
   return normTopic(String(raw).split("\n")[0].replace(/["\u201c\u201d.]/g, ""));
 }
 
-function AddNotesSheet({ open, onClose, materials, subjects, onAddSubject, fixedSubject, defaultSubject, heading, onSave }) {
+function AddNotesSheet({ open, onClose, materials, subjects, onAddSubject, fixedSubject, defaultSubject, defaultTopic, heading, onSave, seed, allowReviewer = true }) {
+  const [kind, setKind] = useState("upload");
   const [title, setTitle] = useState("");
   const [text, setText] = useState("");
   const [subject, setSubject] = useState(fixedSubject || defaultSubject || "");
-  const [topic, setTopic] = useState("");
+  const [topic, setTopic] = useState(defaultTopic || "");
   const [reading, setReading] = useState("");
   const [suggesting, setSuggesting] = useState(false);
   const [saving, setSaving] = useState("");
   const [err, setErr] = useState("");
+  const [files, setFiles] = useState([]); // files read so far: [{ name, size, file }]
+  const [over, setOver] = useState(false);
   const fileRef = useRef(null);
-  useEffect(() => { if (open) setSubject(fixedSubject || defaultSubject || ""); }, [open, fixedSubject, defaultSubject]);
+  useEffect(() => { if (open) { setSubject(fixedSubject || defaultSubject || ""); setTopic(defaultTopic || ""); } }, [open, fixedSubject, defaultSubject, defaultTopic]);
   const allTopics = useMemo(() => topicList(materials, subject ? [subject] : []), [materials, subject]);
   const names = allTopics.map((x) => x.topic);
 
@@ -3307,16 +3333,16 @@ function AddNotesSheet({ open, onClose, materials, subjects, onAddSubject, fixed
     finally { setSuggesting(false); }
   };
 
-  const onFile = async (e) => {
-    const files = [...(e.target.files || [])];
-    e.target.value = "";
-    if (!files.length) return;
+  const readFiles = async (list) => {
+    const picked = [...(list || [])];
+    if (!picked.length) return;
     setErr("");
-    if (!title) setTitle(files[0].name.replace(/\.[^.]+$/, ""));
+    if (!title) setTitle(picked[0].name.replace(/\.[^.]+$/, ""));
     const parts = [];
-    for (let i = 0; i < files.length; i++) {
-      const f = files[i];
-      setReading(files.length > 1 ? `Reading file ${i + 1} of ${files.length}` : "Reading file");
+    const okFiles = [];
+    for (let i = 0; i < picked.length; i++) {
+      const f = picked[i];
+      setReading(picked.length > 1 ? `Reading file ${i + 1} of ${picked.length}` : "Reading file");
       try {
         if (f.size > FILE_MAX) throw new Error("big");
         if (/\.pdf$/i.test(f.name) || f.type === "application/pdf" || f.type.startsWith("image/")) {
@@ -3327,38 +3353,70 @@ function AddNotesSheet({ open, onClose, materials, subjects, onAddSubject, fixed
           const t = await new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(String(r.result)); r.onerror = rej; r.readAsText(f); });
           parts.push(t.slice(0, 20000));
         }
+        okFiles.push({ name: f.name, size: f.size, file: f });
       } catch {
         setErr(`Couldn't read ${f.name}. Files can be up to 10 MB: PDFs, photos, or text files.`);
         Sound.play("err");
       }
     }
     setReading("");
+    setFiles((c) => [...c, ...okFiles]);
     if (parts.length) {
-      const merged = [text.trim(), ...parts].filter(Boolean).join("\n\n");
-      setText(merged); Sound.play("pop");
-      if (!topic.trim()) suggest(merged);
+      setText((cur) => [cur.trim(), ...parts].filter(Boolean).join("\n\n"));
+      Sound.play("pop");
+      if (!topic.trim()) suggest([text.trim(), ...parts].filter(Boolean).join("\n\n"));
     }
   };
+  const onFile = (e) => { const list = [...(e.target.files || [])]; e.target.value = ""; readFiles(list); };
+  // files dropped on the Data tab arrive here as a seed
+  useEffect(() => { if (open && seed && seed.files && seed.files.length) readFiles(seed.files); }, [seed && seed.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const canSave = !!subject && !!text.trim() && !reading && !saving;
+  const need = !text.trim() ? "Add some notes first" : !subject ? "Pick a subject first" : "";
+  const canSave = !need && !reading && !saving;
   const save = async () => {
     setErr(""); setSaving("Saving");
-    const ok = await onSave({ title: title.trim() || "Untitled notes", text: text.trim(), subject, topic: matchTopic(topic, names), onProgress: setSaving });
+    const keep = files.length === 1 ? files[0].file : null; // one file keeps its original; several are merged into one note, so no single original
+    const ok = await onSave({ title: title.trim() || "Untitled notes", text: text.trim(), subject, topic: matchTopic(topic, names), kind, fileObj: keep, onProgress: setSaving });
     setSaving("");
-    if (ok) { setTitle(""); setText(""); setTopic(""); onClose(); }
+    if (ok) { setTitle(""); setText(""); setTopic(""); setFiles([]); setKind("upload"); onClose(); }
     else { setErr("Couldn't save those notes just now. Check your connection and try again."); Sound.play("err"); }
   };
+  const drop = (e) => { e.preventDefault(); setOver(false); readFiles(e.dataTransfer && e.dataTransfer.files); };
 
   return (
-    <Sheet open={open} onClose={() => { if (!saving) onClose(); }} title={heading || "Add notes"}>
+    <Sheet open={open} onClose={() => { if (!saving) onClose(); }} title={heading || "Add to the class"}>
+      {allowReviewer && (
+        <div className="v3-field">
+          <Segmented value={kind} onChange={setKind} options={[["upload", "Class notes"], ["reviewer", "A reviewer I made"]]} />
+        </div>
+      )}
+      <input ref={fileRef} type="file" multiple accept=".pdf,image/*,.txt,.md,.csv,.json,text/plain" hidden onChange={onFile} />
+      <button type="button" className="v3-drop" data-over={over ? 1 : 0} data-busy={reading ? 1 : 0} disabled={!!reading || !!saving}
+        onClick={() => fileRef.current?.click()} onDragOver={(e) => { e.preventDefault(); setOver(true); }} onDragLeave={() => setOver(false)} onDrop={drop}>
+        <span className="v3-dropIcon">{reading ? <span className="v3-spin" /> : <Upload size={20} />}</span>
+        <span className="v3-dropText">
+          <b>{reading ? <>{reading}<Dots /></> : "Choose a PDF, photo or text file"}</b>
+          <span>{kind === "reviewer" ? "Or paste your reviewer below." : "Or paste your notes below."} Up to 10 MB each. The assistant reads files into text you can edit.</span>
+        </span>
+      </button>
+      {files.length > 0 && (
+        <div className="v3-files">
+          {files.map((f, i) => <span key={i} className="v3-file"><Check size={13} />{f.name}<em>{fmtBytes(f.size)}</em></span>)}
+          {files.length === 1 && <span className="v3-fileNote">Original is kept so classmates can download it.</span>}
+        </div>
+      )}
+      <div className="v3-field">
+        <label htmlFor="mx">{kind === "reviewer" ? "Your reviewer" : "Notes"}</label>
+        <textarea id="mx" className="input" style={{ minHeight: 140 }} value={text} onChange={(e) => setText(e.target.value)} placeholder={kind === "reviewer" ? "Paste or type your reviewer" : "Paste notes here"} />
+      </div>
       {!fixedSubject && (
-        <div className="field">
+        <div className="v3-field">
           <label>Subject</label>
           <SubjectPicker subjects={subjects} value={subject} onChange={setSubject} onAdd={onAddSubject} />
         </div>
       )}
-      <div className="field">
-        <label htmlFor="nt-topic">Topic or lesson</label>
+      <div className="v3-field">
+        <label htmlFor="nt-topic">Topic or lesson <span className="v3-opt">helps the assistant find it later</span></label>
         <input id="nt-topic" className="input" value={topic} maxLength={60} onChange={(e) => setTopic(e.target.value)} placeholder="Photosynthesis" />
         {allTopics.length > 0 && (
           <div className="chips" style={{ flexWrap: "wrap", overflow: "visible", padding: 0, marginTop: 8 }}>
@@ -3373,32 +3431,18 @@ function AddNotesSheet({ open, onClose, materials, subjects, onAddSubject, fixed
           </button>
         )}
       </div>
-      <div className="field">
-        <label htmlFor="mt">Title</label>
+      <div className="v3-field">
+        <label htmlFor="mt">Title <span className="v3-opt">optional</span></label>
         <input id="mt" className="input" value={title} maxLength={120} onChange={(e) => setTitle(e.target.value)} placeholder="Lesson 2.1 key points" />
       </div>
-      <div className="field">
-        <label htmlFor="mx">Notes</label>
-        <textarea id="mx" className="input" style={{ minHeight: 160 }} value={text} onChange={(e) => setText(e.target.value)} placeholder="Paste notes here" />
-      </div>
-      <input ref={fileRef} type="file" multiple accept=".pdf,image/*,.txt,.md,.csv,.json,text/plain" hidden onChange={onFile} />
-      <p style={{ fontSize: 13, color: C.muted, margin: "-6px 0 14px", lineHeight: 1.5 }}>
-        PDFs and photos are read by the assistant and turned into notes you can edit. Long files are condensed. After you share them, the assistant reads
-        your notes once so everyone can study from them.
-      </p>
       {err && <p className="err">{err}</p>}
-      <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-        <button className="btn ghost" disabled={!!reading || !!saving} onClick={() => fileRef.current?.click()}>
-          <Upload size={15} style={{ verticalAlign: -2, marginRight: 6 }} />{reading ? <>{reading}<Dots /></> : "Upload PDF, photo or text file"}
-        </button>
-        <button className="btn accent" disabled={!canSave} onClick={save}>{saving ? <>{saving}<Dots /></> : !subject ? "Pick a subject first" : "Share with class"}</button>
-      </div>
+      <button className="btn accent full" disabled={!canSave} onClick={save}>{saving ? <>{saving}<Dots /></> : need || "Share with class"}</button>
     </Sheet>
   );
 }
 
-// The text of a note is only downloaded when someone opens it.
-function NoteBody({ id }) {
+// The text of a note is only downloaded when someone opens it. Reviewers are laid out as a reviewer.
+function NoteBody({ id, doc }) {
   const [t, setT] = useState(null);
   useEffect(() => {
     let dead = false;
@@ -3406,7 +3450,8 @@ function NoteBody({ id }) {
     return () => { dead = true; };
   }, [id]);
   if (t === null) return <div className="matBody"><span className="meta">Opening<Dots /></span></div>;
-  return <div className="matBody">{t || "Couldn't open this note. Check your connection and try again."}</div>;
+  if (!t) return <div className="matBody">Couldn't open this note. Check your connection and try again.</div>;
+  return doc ? <ReviewerDoc text={t} /> : <div className="matBody">{t}</div>;
 }
 
 // Change a note's subject, topic or title (its owner can).
@@ -3426,11 +3471,11 @@ function EditNoteSheet({ note, materials, subjects, onAddSubject, onClose, onSav
   };
   return (
     <Sheet open={!!note} onClose={onClose} title="Edit details">
-      <div className="field">
+      <div className="v3-field">
         <label>Subject</label>
         <SubjectPicker subjects={[...new Set([...subjects, ...(note ? [note.subject] : [])])]} value={subject} onChange={setSubject} onAdd={onAddSubject} />
       </div>
-      <div className="field">
+      <div className="v3-field">
         <label htmlFor="en-topic">Topic or lesson</label>
         <input id="en-topic" className="input" value={topic} maxLength={60} onChange={(e) => setTopic(e.target.value)} placeholder="Photosynthesis" />
         {known.length > 0 && (
@@ -3439,15 +3484,255 @@ function EditNoteSheet({ note, materials, subjects, onAddSubject, onClose, onSav
           </div>
         )}
       </div>
-      <div className="field">
+      <div className="v3-field">
         <label htmlFor="en-title">Title</label>
         <input id="en-title" className="input" value={title} maxLength={120} onChange={(e) => setTitle(e.target.value)} />
       </div>
       {err && <p className="err">{err}</p>}
-      <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-        <button className="btn accent" disabled={busy || !subject} onClick={save}>{busy ? <>Saving<Dots /></> : "Save"}</button>
-      </div>
+      <button className="btn accent full" disabled={busy || !subject} onClick={save}>{busy ? <>Saving<Dots /></> : "Save"}</button>
     </Sheet>
+  );
+}
+
+/* ───────────────────────── Data tab ─────────────────────────
+   The class's shared library: every note and reviewer, by subject and topic. Anyone can add; the owner can edit or
+   remove. This is what the assistant reads from when someone reviews. */
+
+function NoteRow({ m, onOpen, subjectLabel }) {
+  const { label, Icon } = kindMeta(m);
+  return (
+    <button className="v3-note" onClick={() => { Sound.play("tap"); onOpen(m.id); }}>
+      <span className="v3-noteIcon" data-kind={m.kind}><Icon size={17} /></span>
+      <span className="v3-noteMain">
+        <b>{m.title}</b>
+        <span className="v3-noteMeta">
+          {subjectLabel && <span><i className="dot" style={{ background: subjColor(m.subject) }} />{m.subject}</span>}
+          {subjectLabel && m.topic && <span>{m.topic}</span>}
+          <span>{label}</span>
+          <span>{m.mine ? "You" : m.by}</span>
+          <span>{timeAgo(m.at)}</span>
+        </span>
+      </span>
+      <span className="v3-noteState" data-ready={m.ic > 0 || m.kind === "ai" ? 1 : 0}>{m.kind === "ai" ? "Reviewer" : m.ic > 0 ? `${m.ic} ideas` : "Not read yet"}</span>
+    </button>
+  );
+}
+
+function DataTab({ tasks, materials, subjects, onAddSubject, addNote, removeMaterial, relabelMaterial, onStudy, onReviewer, onRefresh, openId, clearOpen }) {
+  const [subj, setSubj] = useState(null);
+  const [q, setQ] = useState("");
+  const [hits, setHits] = useState(null); // notes whose text mentions the words, found by the database
+  const [scopeMine, setScopeMine] = useState("all");
+  const [noTopic, setNoTopic] = useState(false);
+  const [open, setOpen] = useState(null);
+  const [adding, setAdding] = useState(false);
+  const [seed, setSeed] = useState(null);
+  const [editing, setEditing] = useState(null);
+  const [over, setOver] = useState(false);
+  const [dlBusy, setDlBusy] = useState(false);
+  const s = q.trim();
+  useEffect(() => { if (openId) { setOpen(openId); clearOpen(); } }, [openId]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    if (s.length < 2) { setHits(null); return undefined; }
+    let dead = false;
+    const id = setTimeout(async () => { const r = await notes.search(s, 50); if (!dead) setHits(r || []); }, 300);
+    return () => { dead = true; clearTimeout(id); };
+  }, [s]);
+
+  const all = useMemo(() => materials.map((m) => {
+    const t = tasks.find((x) => x.id === m.taskId);
+    return { ...m, subject: m.subject || t?.subject || "Other", taskTitle: m.taskTitle || t?.title || "" };
+  }), [materials, tasks]);
+  const mineOnly = scopeMine === "mine";
+  const base = mineOnly ? all.filter((m) => m.mine) : all;
+  const stats = useMemo(() => libraryStats(all), [all]);
+  const groups = useMemo(() => groupBySubject(base), [base]);
+  const lonely = useMemo(() => untopiced(all), [all]);
+  const rank = new Map((hits || []).map((h, i) => [h.id, { snippet: h.snippet, i }]));
+  const low = s.toLowerCase();
+  const searching = !!s || noTopic;
+  const flat = searching
+    ? base
+      .filter((m) => (noTopic ? !m.topic && m.kind !== "ai" : true))
+      .filter((m) => !s || rank.has(m.id) || `${m.title} ${m.topic} ${m.subject}`.toLowerCase().includes(low))
+      .sort((a, b) => (s && rank.has(a.id) && rank.has(b.id) ? rank.get(a.id).i - rank.get(b.id).i : b.at - a.at))
+    : [];
+  const group = groups.find((g) => g.subject === subj) || null;
+  const recent = [...base].sort((a, b) => b.at - a.at).slice(0, 4);
+  const note = all.find((m) => m.id === open) || null;
+  const startAdd = () => { Sound.play("tap"); setSeed(null); setAdding(true); };
+  const study = (o) => { Sound.play("tap"); onStudy({ period: "final", ...o }); };
+  const download = async (m) => {
+    if (!m.file || dlBusy) return;
+    setDlBusy(true);
+    const url = await notes.fileUrl(m.file.path);
+    setDlBusy(false);
+    if (url) window.open(url, "_blank", "noopener"); else Sound.play("err");
+  };
+
+  const dropProps = {
+    onDragOver: (e) => { if ([...(e.dataTransfer?.types || [])].includes("Files")) { e.preventDefault(); setOver(true); } },
+    onDragLeave: () => setOver(false),
+    onDrop: (e) => { e.preventDefault(); setOver(false); const fl = [...(e.dataTransfer?.files || [])]; if (fl.length) { setSeed({ files: fl, id: uid() }); setAdding(true); } },
+  };
+
+  return (
+    <Scroll onRefresh={onRefresh}>
+      <PageHead eyebrow="Your class" title="Data" lede="Everyone's notes and reviewers, sorted by subject and topic. The assistant reads from here when you review."
+        right={<button className="btn accent v3-headBtn" onClick={startAdd}><Plus size={16} />Add notes</button>} />
+
+      {!group && !searching && (
+        <>
+        <div className="v3-stats" role="list">
+          {[["Notes", stats.notes], ["Subjects", stats.subjects], ["Topics", stats.topics], ["Key ideas", stats.ideas]].map(([l, n]) => (
+            <div key={l} role="listitem"><b>{n}</b><span>{l}</span></div>
+          ))}
+        </div>
+
+        <div className="v3-add" data-over={over ? 1 : 0} {...dropProps}>
+          <span className="v3-addIcon"><FileUp size={22} /></span>
+          <div>
+            <b>Add notes or a reviewer</b>
+            <span>Drop a PDF, photo or text file here, or paste your notes. Tag the subject and topic so the assistant can find them.</span>
+          </div>
+          <button className="btn ghost small" onClick={startAdd}>Choose</button>
+        </div>
+
+        </>
+      )}
+
+      <div className="v3-tools">
+        <label className="v3-search">
+          <Search size={16} aria-hidden="true" />
+          <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Find a lesson: a word or topic" aria-label="Search the notes" />
+          {q && <button className="iconBtn" aria-label="Clear search" onClick={() => setQ("")}><X size={15} /></button>}
+        </label>
+        <Segmented value={scopeMine} onChange={setScopeMine} options={[["all", "Everyone"], ["mine", "Mine"]]} />
+      </div>
+
+      {lonely.length > 0 && !searching && (
+        <div className="v3-nudge" role="status">
+          <span><b>{lonely.length}</b> {lonely.length === 1 ? "note has" : "notes have"} no topic yet, so the assistant can't tell which lesson {lonely.length === 1 ? "it belongs" : "they belong"} to.</span>
+          <button className="btn ghost small" onClick={() => { Sound.play("tap"); setNoTopic(true); }}>Show them</button>
+        </div>
+      )}
+      {noTopic && (
+        <div className="v3-crumb">
+          <button className="back" onClick={() => setNoTopic(false)}><ChevronLeft size={16} />Back</button>
+          <span>Notes with no topic. Open one and tap Edit details to add it.</span>
+        </div>
+      )}
+
+      {searching ? (
+        <div className="v3-list">
+          {s && <p className="meta" style={{ margin: "4px 2px 8px" }}>{flat.length} {flat.length === 1 ? "note matches" : "notes match"} {"\u201c"}{s}{"\u201d"}</p>}
+          {flat.length === 0 && <div className="empty"><div className="serif">Nothing matches</div>Try other words, or check the spelling.</div>}
+          {flat.map((m) => (
+            <div key={m.id}>
+              <NoteRow m={m} onOpen={setOpen} subjectLabel />
+              {rank.get(m.id)?.snippet && <p className="v3-snip">{rank.get(m.id).snippet}</p>}
+            </div>
+          ))}
+        </div>
+      ) : group ? (
+        <section className="v3-subjView" style={{ "--c": subjColor(group.subject) }}>
+          <div className="v3-crumb">
+            <button className="back" onClick={() => { Sound.play("tap"); setSubj(null); }}><ChevronLeft size={16} />All subjects</button>
+          </div>
+          <div className="v3-subjHead">
+            <span className="v3-subjDot" />
+            <div>
+              <h2 className="serif">{group.subject}</h2>
+              <span className="meta">{group.notes} {group.notes === 1 ? "note" : "notes"}, {group.ideas} key ideas, {group.people} {group.people === 1 ? "contributor" : "contributors"}</span>
+            </div>
+          </div>
+          <div className="v3-subjActs">
+            <button className="btn accent small" onClick={() => study({ subjects: [group.subject] })}>Study this subject</button>
+            <button className="btn ghost small" onClick={() => { Sound.play("tap"); onReviewer({ subject: group.subject, topics: [] }); }}><Sparkles size={14} />Write a reviewer</button>
+            <button className="btn ghost small" onClick={startAdd}><Plus size={14} />Add notes here</button>
+          </div>
+          {group.topics.map((t) => (
+            <div className="v3-topic" key={t.topic}>
+              <div className="v3-topicHead">
+                <h3>{t.topic}<small>{t.notes.length}</small></h3>
+                {t.topic !== NO_TOPIC && (
+                  <span className="v3-topicActs">
+                    <button className="v3-link" onClick={() => study({ subjects: [group.subject], topics: [t.topic] })}>Study</button>
+                    <button className="v3-link" onClick={() => { Sound.play("tap"); onReviewer({ subject: group.subject, topics: [t.topic] }); }}>Reviewer</button>
+                  </span>
+                )}
+              </div>
+              {t.topic === NO_TOPIC && <p className="meta" style={{ margin: "0 0 8px" }}>Open a note and tap Edit details to give it a topic.</p>}
+              <div className="v3-list">{t.notes.map((m) => <NoteRow key={m.id} m={m} onOpen={setOpen} />)}</div>
+            </div>
+          ))}
+        </section>
+      ) : (
+        <>
+          {groups.length === 0 ? (
+            <div className="empty v3-empty">
+              <div className="serif">{mineOnly ? "You haven't added anything yet" : "Nothing stored yet"}</div>
+              {mineOnly ? "Add your notes and your classmates can study from them too." : "Notes and reviewers collect here as your class adds them. Be the first."}
+              <div><button className="btn accent small" style={{ marginTop: 16 }} onClick={startAdd}>Add notes</button></div>
+            </div>
+          ) : (
+            <>
+              <h2 className="v3-h">Subjects</h2>
+              <div className="v3-subjGrid">
+                {groups.map((g) => {
+                  const real = g.topics.filter((t) => t.topic !== NO_TOPIC);
+                  return (
+                    <button key={g.subject} className="v3-subj" style={{ "--c": subjColor(g.subject) }} onClick={() => { Sound.play("tap"); setSubj(g.subject); }}>
+                      <span className="v3-subjBar" />
+                      <b className="serif">{g.subject}</b>
+                      <span className="v3-subjMeta">{g.notes} {g.notes === 1 ? "note" : "notes"} <i /> {real.length} {real.length === 1 ? "topic" : "topics"}</span>
+                      <span className="v3-subjTopics">{real.slice(0, 3).map((t) => t.topic).join(", ") || "No topics yet"}</span>
+                      <ChevronRight className="v3-subjGo" size={18} />
+                    </button>
+                  );
+                })}
+              </div>
+              {recent.length > 0 && (
+                <>
+                  <h2 className="v3-h">Recently added</h2>
+                  <div className="v3-list">{recent.map((m) => <NoteRow key={m.id} m={m} onOpen={setOpen} subjectLabel />)}</div>
+                </>
+              )}
+            </>
+          )}
+        </>
+      )}
+
+      <AddNotesSheet open={adding} onClose={() => setAdding(false)} materials={all} subjects={subjects} onAddSubject={onAddSubject}
+        defaultSubject={group ? group.subject : ""} seed={seed} heading="Add to the class" onSave={(f) => addNote(f)} />
+      <EditNoteSheet note={editing} materials={all} subjects={subjects} onAddSubject={onAddSubject} onClose={() => setEditing(null)}
+        onSave={(patch) => relabelMaterial(editing.id, patch)} />
+      <Sheet open={!!note} onClose={() => setOpen(null)} title={note ? note.title : "Note"}>
+        {note && (
+          <div className="v3-nsheet">
+            <div className="v3-tags">
+              <span className="v3-tag"><i className="dot" style={{ background: subjColor(note.subject) }} />{note.subject}</span>
+              {note.topic ? <span className="v3-tag">{note.topic}</span> : <span className="v3-tag" data-warn="1">No topic yet</span>}
+              <span className="v3-tag">{kindMeta(note).label}</span>
+            </div>
+            <p className="meta" style={{ margin: "0 0 14px" }}>
+              Added by {note.mine ? "you" : note.by}, {timeAgo(note.at)}{note.ic > 0 ? `. ${note.ic} key ideas ready to study.` : note.kind === "ai" ? "." : ". Not read by the assistant yet."}
+            </p>
+            <NoteBody id={note.id} doc={note.kind === "ai" || note.kind === "reviewer"} />
+            {note.file && (
+              <button className="v3-fileBtn" disabled={dlBusy} onClick={() => download(note)}>
+                <Download size={16} /><span><b>{dlBusy ? "Opening" : "Download the original"}</b><em>{note.file.name}{note.file.size ? `, ${fmtBytes(note.file.size)}` : ""}</em></span>
+              </button>
+            )}
+            <div className="v3-nacts">
+              {note.kind !== "ai" && <button className="btn accent small" onClick={() => { const n = note; setOpen(null); study({ subjects: [n.subject], topics: n.topic ? [n.topic] : [] }); }}>{note.topic ? "Study this topic" : "Study this subject"}</button>}
+              {(note.mine || note.orphan) && <button className="btn ghost small" onClick={() => { setEditing(note); setOpen(null); }}><Pencil size={14} />Edit details</button>}
+              {(note.mine || note.orphan) && <button className="btn ghost small" style={{ color: C.danger }} onClick={() => { const id = note.id; setOpen(null); removeMaterial(id); }}><Trash2 size={14} />Remove</button>}
+            </div>
+          </div>
+        )}
+      </Sheet>
+    </Scroll>
   );
 }
 
@@ -3480,59 +3765,72 @@ function ReviewDetail({ task, user, materials, subjects, onAddSubject, addNote, 
       setGen(false);
     }
   };
+  const source = mats.filter((m) => m.kind !== "ai");
+  const ideas = source.reduce((n, m) => n + (m.ic || 0), 0);
+  const late = diffDays(task.deadline) < 0;
+  const download = async (m) => { const url = m.file && await notes.fileUrl(m.file.path); if (url) window.open(url, "_blank", "noopener"); else Sound.play("err"); };
   return (
-    <div className="scroll">
+    <div className="scroll v3-detail">
       <button className="back" onClick={onBack}><ChevronLeft size={18} />Review</button>
-      <h1 className="h1" style={{ marginTop: 4 }}>{task.title}</h1>
-      <div className="rowMeta" style={{ fontSize: 14 }}>
-        <span><span className="dot" style={{ background: subjColor(task.subject) }} />{task.subject}</span>
-        <span>{task.type}</span>
-        <span className={diffDays(task.deadline) < 0 ? "late" : ""}>Due {relLabel(task.deadline)}</span>
+      <div className="v3-tags" style={{ marginTop: 8 }}>
+        <span className="v3-tag"><i className="dot" style={{ background: subjColor(task.subject) }} />{task.subject}</span>
+        <span className="v3-tag">{task.type}</span>
+        <span className="v3-tag" data-warn={late ? 1 : 0}>Due {relLabel(task.deadline)}</span>
       </div>
-      {task.notes && <p style={{ color: C.muted, margin: "16px 0 0", lineHeight: 1.55 }}>{task.notes}</p>}
-      <div style={{ display: "flex", gap: 10, marginTop: 22, flexWrap: "wrap" }}>
-        <button className="btn accent" onClick={() => onStudy({ taskId: task.id })}>Study this</button>
+      <h1 className="h1" style={{ marginTop: 10 }}>{task.title}</h1>
+      {task.notes && <p className="v3-lede" style={{ marginTop: 8 }}>{task.notes}</p>}
+      <div className="v3-detailStats">
+        <div><b>{source.length}</b><span>{source.length === 1 ? "note" : "notes"}</span></div>
+        <div><b>{ideas}</b><span>key ideas</span></div>
+        <div><b>{mats.length - source.length}</b><span>{mats.length - source.length === 1 ? "reviewer" : "reviewers"}</span></div>
+      </div>
+      <div className="v3-readActs">
+        <button className="btn accent" onClick={() => onStudy({ taskId: task.id })}>Study this<ArrowRight size={16} /></button>
         <button className="btn ghost" onClick={generate} disabled={gen}>
           <Sparkles size={15} style={{ verticalAlign: -2, marginRight: 6 }} />{gen ? <>Writing reviewer<Dots /></> : "Ask for a reviewer"}
         </button>
       </div>
       {err && <p className="err" style={{ marginTop: 14 }}>{err}</p>}
-      <h2 className="sectionTitle">Review material</h2>
-      {mats.length === 0 && <p style={{ color: C.muted, margin: 0 }}>Nothing here yet. Paste notes, or upload a PDF, photo or text file so classmates can use them too.</p>}
-      {mats.map((m) => (
-        <div className="mat" key={m.id}>
-          <button className="matHead" onClick={() => { Sound.play("tap"); setOpen(open === m.id ? null : m.id); }} aria-expanded={open === m.id}>
-            <span>
-              <span style={{ fontWeight: 500 }}>{m.title}</span>
-              {m.kind === "ai" && <span className="tag">Assistant</span>}
-              {m.topic && <span className="tag">{m.topic}</span>}
-              <span style={{ display: "block", fontSize: 13, color: C.muted }}>Added by {m.by}</span>
-            </span>
-            <ChevronDown size={18} style={{ stroke: "var(--faint)", transform: open === m.id ? "rotate(180deg)" : "none", transition: "transform .15s" }} />
-          </button>
-          {open === m.id && (
-            <>
-              <NoteBody id={m.id} />
-              {(m.mine || m.orphan) && (
-                <button className="back" style={{ color: C.danger, marginBottom: 12 }} onClick={() => removeMaterial(m.id)}>
-                  <Trash2 size={14} style={{ marginRight: 6 }} />Remove
-                </button>
+      <h2 className="v3-h">Material for this task</h2>
+      {mats.length === 0 && <div className="empty"><div className="serif">Nothing here yet</div>Paste notes, or upload a PDF, photo or text file so classmates can use them too.</div>}
+      <div className="v3-list">
+        {mats.map((m) => {
+          const { label, Icon } = kindMeta(m);
+          const isOpen = open === m.id;
+          return (
+            <div className="v3-matCard" key={m.id} data-open={isOpen ? 1 : 0}>
+              <button className="v3-note" onClick={() => { Sound.play("tap"); setOpen(isOpen ? null : m.id); }} aria-expanded={isOpen}>
+                <span className="v3-noteIcon" data-kind={m.kind}><Icon size={17} /></span>
+                <span className="v3-noteMain">
+                  <b>{m.title}</b>
+                  <span className="v3-noteMeta">{m.topic && <span>{m.topic}</span>}<span>{label}</span><span>{m.mine ? "You" : m.by}</span>{m.ic > 0 && <span>{m.ic} ideas</span>}</span>
+                </span>
+                <ChevronDown size={18} className="v3-noteGo" style={{ transform: isOpen ? "rotate(180deg)" : "none" }} />
+              </button>
+              {isOpen && (
+                <div className="v3-matBody">
+                  <NoteBody id={m.id} doc={m.kind === "ai" || m.kind === "reviewer"} />
+                  <div className="v3-nacts">
+                    {m.file && <button className="btn ghost small" onClick={() => download(m)}><Download size={14} />Original</button>}
+                    {(m.mine || m.orphan) && <button className="btn ghost small" style={{ color: C.danger }} onClick={() => removeMaterial(m.id)}><Trash2 size={14} />Remove</button>}
+                  </div>
+                </div>
               )}
-            </>
-          )}
-        </div>
-      ))}
+            </div>
+          );
+        })}
+      </div>
       <button className="btn ghost" style={{ marginTop: 18 }} onClick={() => setAdding(true)}>
         <Plus size={15} style={{ verticalAlign: -2, marginRight: 6 }} />Add material
       </button>
       <AddNotesSheet open={adding} onClose={() => setAdding(false)} materials={materials} subjects={subjects} onAddSubject={onAddSubject}
         fixedSubject={task.subject} heading="Add review material"
-        onSave={(f) => addNote({ ...f, kind: "upload", taskId: task.id, taskTitle: task.title })} />
+        onSave={(f) => addNote({ ...f, taskId: task.id, taskTitle: task.title })} />
     </div>
   );
 }
 
-function WeeklyReviewer({ tasks, materials, weeklies, user, saveWeekly, initialWs, onInventory, onStudy }) {
+function WeeklyReviewer({ tasks, materials, weeklies, user, saveWeekly, initialWs, onInventory, onStudy, onBack }) {
   const thisWeek = weekStartOf(todayISO());
   const lastWeek = addDays(thisWeek, -7);
   const [ws, setWs] = useState(initialWs || thisWeek);
@@ -3564,7 +3862,7 @@ function WeeklyReviewer({ tasks, materials, weeklies, user, saveWeekly, initialW
         return `SUBJECT: ${s}\nTasks:\n${d.tasks.map((t) => `- ${t.title} (${t.type}, due ${t.deadline})${t.notes ? `, notes: ${t.notes}` : ""}`).join("\n") || "- none"}\nKey ideas from the notes (${ideas.length}):\n${ideas.length ? ideaLines(ideas) : "none"}`;
       }).join("\n\n");
       const next = tasks.filter((t) => t.deadline >= addDays(ws, 7) && t.deadline <= addDays(ws, 13)).map((t) => `${t.title} (${t.subject}, ${fmtDate(t.deadline)})`).join("; ");
-      const system = `You write a weekly reviewer for a class, covering what the class worked on and learned. Plain text only, no markdown symbols, no emojis. Start with one sentence summing up the week. Then, for each subject, put the subject name on its own line, followed by one short line for every key idea listed for that subject (group related ideas under small topic labels and merge true duplicates, but never leave an idea out), then one self-check question. Take facts only from the material provided. When a subject has only a task title and notes and no material, say what was assigned and do not invent lesson content. Finish with a short "Coming up" line using the next-week list.`;
+      const system = `You write a weekly reviewer for a class, covering what the class worked on and learned. Plain text only, no markdown symbols, no emojis. Start with one sentence summing up the week. Then, for each subject, put the subject name on its own line, followed by one line for every key idea listed for that subject, written as "Term: one short sentence of meaning" (group related ideas under small topic labels and merge true duplicates, but never leave an idea out), then one self-check question ending with a question mark. Take facts only from the material provided. When a subject has only a task title and notes and no material, say what was assigned and do not invent lesson content. Finish with a short "Coming up" line using the next-week list.`;
       let full = (await streamClaude(system, [{ role: "user", content: `Week of ${weekLabel(ws)}.\n\n${body}\n\nComing next week: ${next || "nothing listed yet"}` }], (t) => setLive(t))).trim();
       if (!full) throw new Error("empty");
       const missing = all.filter((i) => !ideaCovered(full, i));
@@ -3581,22 +3879,21 @@ function WeeklyReviewer({ tasks, materials, weeklies, user, saveWeekly, initialW
     }
   };
   return (
-    <div style={{ marginTop: 14 }}>
-      <div className="chips" style={{ padding: "0 0 4px" }}>
-        <button className="chip" aria-pressed={ws === thisWeek} onClick={() => pick(thisWeek)}>This week</button>
-        <button className="chip" aria-pressed={ws === lastWeek} onClick={() => pick(lastWeek)}>Last week</button>
+    <div className="v3-reader">
+      <button className="back" onClick={onBack}><ChevronLeft size={18} />Reviewers</button>
+      <h1 className="h1" style={{ marginTop: 8 }}>Weekly reviewer</h1>
+      <p className="v3-lede" style={{ marginTop: 4 }}>{weekLabel(ws)}. {ts.length} {ts.length === 1 ? "task" : "tasks"} due, {ms.length} {ms.length === 1 ? "item" : "items"} of material.</p>
+      <div style={{ margin: "16px 0 20px" }}>
+        <Segmented value={ws === thisWeek || ws === lastWeek ? ws : "other"} onChange={(v) => { if (v !== "other") pick(v); }}
+          options={[[thisWeek, "This week"], [lastWeek, "Last week"], ...(ws !== thisWeek && ws !== lastWeek ? [["other", "Earlier"]] : [])]} />
       </div>
-      <h2 className="sectionTitle" style={{ marginTop: 14 }}>{weekLabel(ws)}</h2>
-      <p className="meta" style={{ margin: "0 0 18px" }}>
-        {ts.length} {ts.length === 1 ? "task" : "tasks"} due, {ms.length} {ms.length === 1 ? "item" : "items"} of material
-      </p>
       {busy && !live && <Waiting lines={["Gathering the week", "Pulling out the key points", "Writing it up"]} />}
-      {shown && <div className="serif" style={{ fontSize: 18, lineHeight: 1.65, whiteSpace: "pre-wrap" }}>{shown}</div>}
-      {saved && !busy && <p className="meta" style={{ marginTop: 14 }}>Made by {saved.by}, {timeAgo(saved.at)}. Everyone in the class can read this.</p>}
-      {!saved && !busy && !err && <p style={{ color: C.muted, margin: "0 0 4px" }}>No reviewer for this week yet. It pulls together every task and note from the week into one page.</p>}
+      {shown && <ReviewerDoc text={shown} live={busy} />}
+      {saved && !busy && <p className="meta" style={{ marginTop: 16 }}>Made by {saved.by}, {timeAgo(saved.at)}. Everyone in the class can read this.</p>}
+      {!saved && !busy && !err && <div className="empty"><div className="serif">No reviewer for this week yet</div>It pulls together every task and note from the week into one page.</div>}
       {err && <p className="err">{err}</p>}
       {!busy && (
-        <div style={{ display: "flex", gap: 10, marginTop: 18, flexWrap: "wrap" }}>
+        <div className="v3-readActs" style={{ marginTop: 18 }}>
           <button className={saved ? "btn ghost" : "btn accent"} onClick={generate}>{saved ? "Make it again" : "Make the reviewer"}</button>
           {saved && <button className="btn accent" onClick={() => onStudy({ period: "week" })}>Study this week</button>}
           {saved && (
@@ -3607,152 +3904,19 @@ function WeeklyReviewer({ tasks, materials, weeklies, user, saveWeekly, initialW
         </div>
       )}
       {earlier.length > 0 && (
-        <section className="group">
-          <h3>Earlier weeks <small>{earlier.length}</small></h3>
-          {earlier.map((w) => (
-            <button key={w.id} className="row" onClick={() => pick(w.weekStart)}>
-              <div className="rowMain">
-                <div className="rowTitle">{weekLabel(w.weekStart)}</div>
-                <div className="rowMeta"><span>Made by {w.by}</span></div>
-              </div>
-            </button>
-          ))}
-        </section>
+        <>
+          <h2 className="v3-h">Earlier weeks <small>{earlier.length}</small></h2>
+          <div className="v3-list">
+            {earlier.map((w) => (
+              <button key={w.id} className="v3-note" onClick={() => pick(w.weekStart)}>
+                <span className="v3-noteIcon"><CalendarDays size={17} /></span>
+                <span className="v3-noteMain"><b>{weekLabel(w.weekStart)}</b><span className="v3-noteMeta"><span>Made by {w.by}</span></span></span>
+                <ChevronRight size={16} className="v3-noteGo" />
+              </button>
+            ))}
+          </div>
+        </>
       )}
-    </div>
-  );
-}
-
-function Library({ tasks, materials, user, subjects, onAddSubject, addNote, removeMaterial, relabelMaterial, onStudy, onInventory }) {
-  const [subj, setSubj] = useState("All");
-  const [topic, setTopic] = useState("");
-  const [q, setQ] = useState("");
-  const [hits, setHits] = useState(null); // notes whose text mentions the words, found by the database: [{ id, snippet }]
-  const [open, setOpen] = useState(null);
-  const [adding, setAdding] = useState(false);
-  const [editing, setEditing] = useState(null);
-  const [gen, setGen] = useState("");
-  const [err, setErr] = useState("");
-  const s = q.trim();
-  useEffect(() => {
-    if (s.length < 2) { setHits(null); return; }
-    let dead = false;
-    const id = setTimeout(async () => { const r = await notes.search(s, 50); if (!dead) setHits(r || []); }, 300);
-    return () => { dead = true; clearTimeout(id); };
-  }, [s]);
-  const all = materials.map((m) => {
-    const t = tasks.find((x) => x.id === m.taskId);
-    return { ...m, subject: m.subject || t?.subject || "Other", taskTitle: m.taskTitle || t?.title || "", gone: !!m.taskId && !t };
-  });
-  const subjectsUsed = [...new Set(all.map((m) => m.subject))];
-  const topics = topicList(all, subj === "All" ? [] : [subj]);
-  const rank = new Map((hits || []).map((h, i) => [h.id, { snippet: h.snippet, i }]));
-  const low = s.toLowerCase();
-  const list = all
-    .filter((m) => (subj === "All" || m.subject === subj) && (!topic || m.topic === topic))
-    .filter((m) => !s || rank.has(m.id) || `${m.title} ${m.topic} ${m.subject}`.toLowerCase().includes(low))
-    .sort((a, b) => (s && rank.has(a.id) && rank.has(b.id) ? rank.get(a.id).i - rank.get(b.id).i : b.at - a.at));
-  const picked = subj !== "All" || !!topic || !!s;
-  const studyable = list.filter((m) => m.kind !== "ai");
-  const study = () => onStudy({ subjects: subj === "All" ? [] : [subj], topics: topic ? [topic] : [], q: s, period: "final" });
-  // A reviewer for exactly what is on screen: every idea from those notes, written up and saved to the Library for everyone.
-  const makeReviewer = async () => {
-    if (!studyable.length) { setErr("There are no notes in this selection yet."); return; }
-    setGen("Reading the notes"); setErr("");
-    try {
-      const inv = await ensureInventory(studyable.map((m) => ({ m, subject: m.subject })), onInventory, (t) => setGen(t), null);
-      let ideas = studyable.flatMap((m) => inv[m.id]?.ideas || []);
-      const capped = ideas.length > 250;
-      if (capped) ideas = ideas.slice(0, 250);
-      setGen("Writing the reviewer");
-      const label = [subj !== "All" ? subj : "all subjects", topic, s && `\u201c${s}\u201d`].filter(Boolean).join(", ");
-      const out = await writeReviewer(label, ideas);
-      const ok = await addNote({
-        title: `Reviewer: ${[topic || s, subj !== "All" ? subj : ""].filter(Boolean).join(" \u00b7 ") || "all notes"}`, text: out, kind: "ai",
-        subject: subj !== "All" ? subj : studyable[0].subject, topic: topic || "",
-      });
-      if (!ok) throw new Error("save");
-      Sound.play("bell");
-      if (capped) setErr("That was a lot of notes, so the reviewer covers the newest 250 ideas. Pick a topic to cover the rest.");
-    } catch {
-      setErr("The assistant couldn't write a reviewer just now. Try again in a moment.");
-      Sound.play("err");
-    } finally {
-      setGen("");
-    }
-  };
-  return (
-    <div style={{ marginTop: 14 }}>
-      <p style={{ color: C.muted, margin: "0 0 12px", lineHeight: 1.5 }}>
-        {all.length} {all.length === 1 ? "item" : "items"} of material and {tasks.length} tasks on record. Everything stays here, even after a task is finished or removed.
-      </p>
-      <button className="btn accent small" onClick={() => setAdding(true)}><Plus size={14} style={{ verticalAlign: -2, marginRight: 6 }} />Add notes</button>
-      <input className="input" style={{ marginTop: 14 }} value={q} onChange={(e) => setQ(e.target.value)} placeholder="Find a lesson: type a word or topic" aria-label="Search the notes" />
-      {subjectsUsed.length > 0 && (
-        <div className="chips">
-          {["All", ...subjectsUsed].map((x) => (
-            <button key={x} className="chip" aria-pressed={subj === x} onClick={() => { Sound.play("tap"); setSubj(x); setTopic(""); }}>
-              {x !== "All" && <span className="dot" style={{ background: subjColor(x), margin: 0 }} />}{x}
-            </button>
-          ))}
-        </div>
-      )}
-      {topics.length > 0 && (
-        <div className="chips" style={{ marginTop: 6 }}>
-          <button className="chip" aria-pressed={!topic} onClick={() => { Sound.play("tap"); setTopic(""); }}>All topics</button>
-          {topics.map((x) => <button key={x.topic} className="chip" aria-pressed={topic === x.topic} onClick={() => { Sound.play("tap"); setTopic(topic === x.topic ? "" : x.topic); }}>{x.topic}</button>)}
-        </div>
-      )}
-      {picked && studyable.length > 0 && (
-        <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 12 }}>
-          <button className="btn accent small" disabled={!!gen} onClick={() => { Sound.play("tap"); study(); }}>Study these</button>
-          <button className="btn ghost small" disabled={!!gen} onClick={makeReviewer}>
-            <Sparkles size={14} style={{ verticalAlign: -2, marginRight: 6 }} />{gen ? <>{gen}<Dots /></> : "Make a reviewer"}
-          </button>
-        </div>
-      )}
-      {err && <p className="err" style={{ marginTop: 12 }}>{err}</p>}
-      {list.length === 0 && (
-        <div className="empty">
-          <div className="serif">{all.length === 0 ? "Nothing stored yet" : "Nothing matches"}</div>
-          {all.length === 0 ? "Notes, uploads and reviewers collect here as your class adds them." : "Try other words, or pick another subject or topic."}
-        </div>
-      )}
-      {list.map((m) => (
-        <div className="mat" key={m.id}>
-          <button className="matHead" onClick={() => { Sound.play("tap"); setOpen(open === m.id ? null : m.id); }} aria-expanded={open === m.id}>
-            <span>
-              <span style={{ fontWeight: 500 }}>{m.title}</span>
-              {m.kind === "ai" && <span className="tag">Assistant</span>}
-              <span className="rowMeta" style={{ marginTop: 2 }}>
-                <span><span className="dot" style={{ background: subjColor(m.subject) }} />{m.subject}</span>
-                {m.topic && <span>{m.topic}</span>}
-                {m.taskTitle && <span>{m.taskTitle}{m.gone ? " (task removed)" : ""}</span>}
-                <span>{fmtDate(toISO(new Date(m.at)))}</span>
-                {m.ic > 0 && <span>{m.ic} key ideas</span>}
-              </span>
-              {rank.get(m.id)?.snippet && <span style={{ display: "block", fontSize: 13, color: C.muted, marginTop: 4, lineHeight: 1.5 }}>{rank.get(m.id).snippet}</span>}
-            </span>
-            <ChevronDown size={18} style={{ stroke: "var(--faint)", flex: "none", transform: open === m.id ? "rotate(180deg)" : "none", transition: "transform .15s" }} />
-          </button>
-          {open === m.id && (
-            <>
-              <NoteBody id={m.id} />
-              <p className="meta" style={{ margin: "-6px 0 10px" }}>Added by {m.by}</p>
-              {(m.mine || m.orphan) && (
-                <div style={{ display: "flex", gap: 16, marginBottom: 12 }}>
-                  <button className="back" onClick={() => setEditing(m)}><Pencil size={14} style={{ marginRight: 6 }} />Edit subject and topic</button>
-                  <button className="back" style={{ color: C.danger }} onClick={() => removeMaterial(m.id)}><Trash2 size={14} style={{ marginRight: 6 }} />Remove</button>
-                </div>
-              )}
-            </>
-          )}
-        </div>
-      ))}
-      <AddNotesSheet open={adding} onClose={() => setAdding(false)} materials={materials} subjects={subjects} onAddSubject={onAddSubject}
-        defaultSubject={subj !== "All" ? subj : ""} heading="Add notes" onSave={(f) => addNote({ ...f, kind: "upload" })} />
-      <EditNoteSheet note={editing} materials={materials} subjects={subjects} onAddSubject={onAddSubject} onClose={() => setEditing(null)}
-        onSave={(patch) => relabelMaterial(editing.id, patch)} />
     </div>
   );
 }
@@ -3859,7 +4023,7 @@ const ideaCovered = (text, idea) => {
   return w.length > 0 && w.filter((x) => h.includes(x)).length / w.length >= 0.6;
 };
 
-const REVIEWER_SYSTEM = `You write clear, well-organized study reviewers for students. Plain text only, no markdown symbols, no emojis. Use short headed sections separated by blank lines. Include EVERY idea you are given, grouped by topic, one or two short lines each. Never add facts that are not in the list.`;
+const REVIEWER_SYSTEM = `You write clear, well-organized study reviewers for students. Plain text only: no markdown symbols, no bullet characters, no emojis. Line 1 is a short title. Then short sections: each section name goes on its own line, followed by one idea per line written as "Term: one short sentence of meaning". Group the ideas by topic, in the order a student would learn them. Include EVERY idea you are given. Finish with a section named Check yourself that has 3 to 5 short questions, one per line, each ending with a question mark. Never add facts that are not in the list.`;
 // Writes a reviewer from a list of ideas, then checks it: anything the first draft left out is added back at the end.
 async function writeReviewer(heading, ideas) {
   if (!ideas.length) throw new Error("no ideas");
@@ -4400,15 +4564,23 @@ function PlanRun({ subjects, study, update, onStart, onExit }) {
 }
 
 const REC = { today: ["cards", "cloze"], week: ["teach", "quiz"], final: ["blurt", "exam"] };
-function StudyHub({ tasks, materials, subjects, onInventory, user, classQuarter, scope, onSaved }) {
+const ALL_SCOPE = { period: "final", pick: [], topicPick: [], q: "", focus: null };
+const runLabel = (sc) => (sc.q.trim() ? `\u201c${sc.q.trim()}\u201d` : sc.topicPick.length === 1 ? sc.topicPick[0] : sc.pick.length === 1 ? sc.pick[0] : sc.pick.length ? `${sc.pick.length} subjects` : "Everything");
+
+/* ───────────────────────── study ─────────────────────────
+   One calm screen: what is next, what you're reviewing (one bar that opens the choices), and how (nine techniques as tiles,
+   one picked at a time with a plain line about it). Every technique is built from the same ideas inventory as before. */
+function StudyHub({ tasks, progress, materials, subjects, onInventory, user, classQuarter, scope, onSaved, onOpenTask, onGoData }) {
   const saved = (() => { try { return JSON.parse(localStorage.getItem("hr:study") || "{}"); } catch { return {}; } })();
   const [period, setPeriod] = useState(PERIODS.some((p) => p[0] === saved.period) ? saved.period : "week");
   const [pick, setPick] = useState(Array.isArray(saved.pick) ? saved.pick : []);
   const [focus, setFocus] = useState(null); // study just one task's notes
   const [topicPick, setTopicPick] = useState([]); // narrow to some topics
   const [q, setQ] = useState(""); // or find lessons by a word: the database picks the matching ideas
+  const [tech, setTech] = useState(null); // null: the suggested one
+  const [scopeOpen, setScopeOpen] = useState(false);
   useEffect(() => { try { localStorage.setItem("hr:study", JSON.stringify({ period, pick })); } catch { /* storage blocked */ } }, [period, pick]);
-  useEffect(() => { if (!scope) return; setFocus(scope.taskId || null); if (scope.period) setPeriod(scope.period); if (scope.taskId) setPick([]); else if (scope.subjects) setPick(scope.subjects); setTopicPick(scope.taskId ? [] : scope.topics || []); setQ(scope.taskId ? "" : scope.q || ""); }, [scope?.id]);
+  useEffect(() => { if (!scope) return; setFocus(scope.taskId || null); if (scope.period) setPeriod(scope.period); if (scope.taskId) setPick([]); else if (scope.subjects) setPick(scope.subjects); setTopicPick(scope.taskId ? [] : scope.topics || []); setQ(scope.taskId ? "" : scope.q || ""); setTech(null); }, [scope?.id]); // eslint-disable-line react-hooks/exhaustive-deps
   const [study, update] = useStudy(user, onSaved);
   const [run, setRun] = useState(null);
   const [prep, setPrep] = useState("");
@@ -4416,7 +4588,9 @@ function StudyHub({ tasks, materials, subjects, onInventory, user, classQuarter,
   const tried = useRef(new Set());
   const withSubj = useMemo(() => materials.map((m) => ({ m, t: tasks.find((x) => x.id === m.taskId), subject: subjectOfMat(m, tasks) })), [materials, tasks]);
   const subsWithNotes = useMemo(() => [...new Set(withSubj.map((x) => x.subject))], [withSubj]);
-  const pool = withSubj.filter((x) => x.m.kind !== "ai" && (focus ? x.m.taskId === focus : inPeriod(x.m, x.t, period, classQuarter) && (pick.length === 0 || pick.includes(x.subject)) && (topicPick.length === 0 || topicPick.includes(x.m.topic))));
+  const poolFor = (sc) => withSubj.filter((x) => x.m.kind !== "ai" && (sc.focus ? x.m.taskId === sc.focus : inPeriod(x.m, x.t, sc.period, classQuarter) && (sc.pick.length === 0 || sc.pick.includes(x.subject)) && (sc.topicPick.length === 0 || sc.topicPick.includes(x.m.topic))));
+  const cur = { period, pick, topicPick, q, focus };
+  const pool = poolFor(cur);
   const topics = useMemo(() => topicList(materials.filter((m) => m.kind !== "ai"), pick), [materials, pick]);
   const focusTitle = focus ? tasks.find((t) => t.id === focus)?.title : null;
   // how many ideas are ready comes from each note's summary, so nothing has to be downloaded just to show the count
@@ -4428,32 +4602,44 @@ function StudyHub({ tasks, materials, subjects, onInventory, user, classQuarter,
     return Object.values(study.cards).filter((c) => c.due <= t).length;
   }, [study]);
   const weekSessions = study ? (study.log || []).filter((l) => l.at >= Date.now() - 7 * 864e5).length : 0;
+  const hasNotes = materials.some((m) => m.kind !== "ai");
 
-  const prepare = () => ensureInventory(pool, onInventory, setPrep, tried.current);
-  const start = async (kind, subsOverride) => {
+  const prepare = (p) => ensureInventory(p, onInventory, setPrep, tried.current);
+  const start = async (kind, over = {}) => {
     setNote("");
+    const sc = { ...cur, ...over };
     if (kind === "plan") { setRun({ kind, ideas: [], label: "plan" }); return; }
-    if (subsOverride) setPick(subsOverride);
-    const word = q.trim();
-    if (word && !focus) {
+    const word = sc.q.trim();
+    if (word && !sc.focus) {
       // a search: the database finds the matching ideas across the class's notes, and only those are studied
       setPrep("Finding the lessons");
-      const found = await notes.findIdeas({ subjects: subsOverride || pick, topics: topicPick, q: word, limit: 120 });
+      const found = await notes.findIdeas({ subjects: sc.pick, topics: sc.topicPick, q: word, limit: 120 });
       setPrep("");
       if (found === null) { setNote("Couldn't search just now. Check your connection and try again."); Sound.play("err"); return; }
       if (found.length === 0) { setNote(`No lessons matched "${word}". Try fewer words, or check the spelling.`); Sound.play("err"); return; }
-      setRun({ kind, ideas: found, label: `\u201c${word}\u201d` });
+      setRun({ kind, ideas: found, label: runLabel(sc) });
       return;
     }
-    if (pool.length === 0) { setNote("There are no notes in this selection yet. Try a longer period, or add some notes under Library."); Sound.play("err"); return; }
+    const p = poolFor(sc);
+    if (p.length === 0) { setNote("There are no notes in this selection yet. Try a longer period, or add some notes in Data."); Sound.play("err"); return; }
     setPrep("Getting your notes ready");
-    const cur = await prepare();
-    const ideas = pool.flatMap((x) => (cur[x.m.id]?.ideas || []).map((id, i) => ({ ...id, id: `${x.m.id}:${i}`, mid: x.m.id, mt: x.m.title, subject: x.subject })));
+    const inv = await prepare(p);
+    const ideas = p.flatMap((x) => (inv[x.m.id]?.ideas || []).map((id, i) => ({ ...id, id: `${x.m.id}:${i}`, mid: x.m.id, mt: x.m.title, subject: x.subject })));
     setPrep("");
     if (ideas.length === 0) { setNote("Couldn't find anything to study in those notes."); return; }
-    setRun({ kind, ideas, label: topicPick.length === 1 ? topicPick[0] : pick.length === 1 ? pick[0] : pick.length ? `${pick.length} subjects` : "Everything" });
+    setRun({ kind, ideas, label: sc.focus ? (tasks.find((t) => t.id === sc.focus)?.title || "this task") : runLabel(sc) });
   };
   const exit = () => setRun(null);
+
+  const rec = focus ? ["quiz", "cards"] : REC[period] || [];
+  const techId = tech || rec[0] || "cards";
+  const T = TECHS.find((x) => x.id === techId) || TECHS[0];
+  const upcoming = useMemo(() => tasks
+    .filter((t) => REVIEW_TYPES.includes(t.type) && (progress[t.id] || "todo") !== "done" && diffDays(t.deadline) >= -1)
+    .sort((a, b) => a.deadline.localeCompare(b.deadline))
+    .map((t) => { const ms = materials.filter((m) => m.taskId === t.id && m.kind !== "ai"); return { t, n: ms.length, ic: ms.reduce((s, m) => s + (m.ic || 0), 0) }; }), [tasks, progress, materials]);
+  const next = upcoming[0];
+
   if (!study) return <p className="meta" style={{ marginTop: 20 }}>Loading<Dots /></p>;
   if (run) {
     const p = { ideas: run.ideas, study, update, onExit: exit, label: run.label };
@@ -4466,120 +4652,346 @@ function StudyHub({ tasks, materials, subjects, onInventory, user, classQuarter,
         {run.kind === "teach" && <TeachRun {...p} />}
         {run.kind === "blurt" && <BlurtRun {...p} />}
         {(run.kind === "quiz" || run.kind === "exam") && <QuizRun {...p} kind={run.kind} />}
-        {run.kind === "plan" && <PlanRun subjects={pick.length ? pick : subsWithNotes} study={study} update={update} onExit={exit} onStart={(k, s) => { setRun(null); setTimeout(() => start(k, s), 0); }} />}
+        {run.kind === "plan" && <PlanRun subjects={pick.length ? pick : subsWithNotes} study={study} update={update} onExit={exit} onStart={(k, s) => { setRun(null); if (s.length) setPick(s); setTimeout(() => start(k, s.length ? { pick: s } : {}), 0); }} />}
       </div>
     );
   }
-  return (
-    <div className="study">
-      {(dueCards > 0 || weekSessions > 0) && (
-        <div className="studyStats">
-          {dueCards > 0 && <span><b>{dueCards}</b> flashcard{dueCards > 1 ? "s" : ""} due today</span>}
-          {weekSessions > 0 && <span><b>{weekSessions}</b> session{weekSessions > 1 ? "s" : ""} this week</span>}
-        </div>
-      )}
-      <h3 className="stepLabel"><i>1</i>What do you want to review?</h3>
-      {focus && <div className="focusPill"><span>Only <b>{focusTitle || "this task"}</b></span><button aria-label="Review everything again" onClick={() => { Sound.play("tap"); setFocus(null); }}><X size={14} /></button></div>}
-      {!focus && <>
-      <Segmented value={period} onChange={(v) => { Sound.play("tap"); setPeriod(v); }} options={PERIODS.map(([k, l]) => [k, l])} />
-      <p className="meta" style={{ margin: "8px 0 10px" }}>{PERIODS.find((p) => p[0] === period)[2]}.</p>
-      <div className="chips" style={{ flexWrap: "wrap", overflow: "visible", padding: 0 }}>
-        <button className="chip" aria-pressed={pick.length === 0} onClick={() => { Sound.play("tap"); setPick([]); }}>Every subject</button>
-        {(subsWithNotes.length ? subsWithNotes : subjects).map((s) => (
-          <button key={s} className="chip" aria-pressed={pick.includes(s)} onClick={() => { Sound.play("tap"); setPick((c) => (c.includes(s) ? c.filter((x) => x !== s) : [...c, s])); }}>
-            <span className="dot" style={{ background: subjColor(s), margin: 0 }} />{s}
-          </button>
-        ))}
-      </div>
-      {topics.length > 0 && (
-        <div className="chips" style={{ flexWrap: "wrap", overflow: "visible", padding: 0, marginTop: 8 }}>
-          <button className="chip" aria-pressed={topicPick.length === 0} onClick={() => { Sound.play("tap"); setTopicPick([]); }}>Every topic</button>
-          {topics.map((x) => (
-            <button key={x.topic} className="chip" aria-pressed={topicPick.includes(x.topic)} onClick={() => { Sound.play("tap"); setTopicPick((c) => (c.includes(x.topic) ? c.filter((t) => t !== x.topic) : [...c, x.topic])); }}>{x.topic}</button>
-          ))}
-        </div>
-      )}
-      <input className="input" style={{ marginTop: 12 }} value={q} onChange={(e) => setQ(e.target.value)} placeholder="Or find a lesson by a word (searches all notes)" aria-label="Find a lesson" />
-      </>}
-      <div className="scopeLine">
-        {q.trim() && !focus ? <>Looking for <b>{"\u201c"}{q.trim()}{"\u201d"}</b> across your class's notes, and studying only the ideas that match.</> : pool.length === 0 ? "No notes in this selection yet." : <><b>{pool.length}</b> note{pool.length > 1 ? "s" : ""}{ideaCount > 0 && <>, <b>{ideaCount}</b> key ideas</>}{unread > 0 && <>, {unread} still to be read</>}. Every technique below uses all of them.</>}
-      </div>
-      <h3 className="stepLabel"><i>2</i>How do you want to review it?</h3>
-      {GOALS.map(([g, title, sub]) => (
-        <section key={g} className="goal">
-          <div className="goalHead"><b>{title}</b><span>{sub}</span></div>
-          <div className="techGrid">
-            {TECHS.filter((t) => t.goal === g).map((t) => (
-              <button key={t.id} className="tech" data-rec={!focus && (REC[period] || []).includes(t.id) ? 1 : 0} disabled={!!prep} onClick={() => { Sound.play("tap"); start(t.id); }}>
-                {!focus && (REC[period] || []).includes(t.id) && <i className="recTag">Suggested {period === "today" ? "for today" : period === "week" ? "this week" : "for the final"}</i>}
-                <b>{t.name}</b><span>{t.tip}</span><em>{t.time}</em>
-              </button>
-            ))}
-          </div>
-        </section>
-      ))}
-      {prep && <div className="prepBar" role="status"><i /> {prep}<Dots /></div>}
-      {note && <p className="err" role="alert" style={{ marginTop: 14 }}>{note}</p>}
-    </div>
-  );
-}
 
-function ReviewTab({ tasks, progress, materials, weeklies, saveWeekly, user, addNote, removeMaterial, relabelMaterial, onAddSubject, focusId, clearFocus, reviewStart, clearStart, onRefresh, subjects, onInventory, classQuarter, onSaved }) {
-  const [sel, setSel] = useState(focusId || null);
-  const [all, setAll] = useState(false);
-  const [section, setSection] = useState("study");
-  const [scope, setScope] = useState(null);
-  const goStudy = (o) => { Sound.play("tap"); setSel(null); setSection("study"); setScope({ ...o, id: uid() }); };
-  const [startWs, setStartWs] = useState(null);
-  useEffect(() => {
-    if (reviewStart) { setSection(reviewStart.section); setStartWs(reviewStart.ws || null); setSel(null); clearStart(); }
-  }, [reviewStart]);
-  useEffect(() => { if (focusId) { setSel(focusId); clearFocus(); } }, [focusId]);
-  const task = tasks.find((t) => t.id === sel);
-  if (task) return <ReviewDetail task={task} user={user} materials={materials} subjects={subjects} onAddSubject={onAddSubject} addNote={addNote} removeMaterial={removeMaterial} onBack={() => setSel(null)} onStudy={goStudy} onInventory={onInventory} />;
-  const sorted = [...tasks].sort((a, b) => a.deadline.localeCompare(b.deadline));
-  const upcoming = sorted.filter((t) => (progress[t.id] || "todo") !== "done");
-  const list = upcoming.filter((t) => all || REVIEW_TYPES.includes(t.type) || materials.some((m) => m.taskId === t.id));
+  // the one card at the top: whatever matters most right now
+  let hero;
+  const soon = next && diffDays(next.t.deadline) <= 3;
+  if (!hasNotes) hero = { kicker: "Start here", title: "Add your first notes", body: "Everything you review is built from the notes your class adds in Data.", cta: "Open Data", act: onGoData };
+  else if (soon || (!dueCards && next)) hero = {
+    kicker: `${next.t.type} ${relLabel(next.t.deadline).toLowerCase()}`, title: next.t.title,
+    body: next.n ? `${next.n} ${next.n === 1 ? "note" : "notes"}, ${next.ic} key ideas ready.` : "No notes added for this yet.",
+    cta: next.n ? "Study this" : "Add notes", act: () => (next.n ? start(diffDays(next.t.deadline) <= 3 ? "quiz" : "cards", { focus: next.t.id }) : onOpenTask(next.t.id)),
+    more: () => onOpenTask(next.t.id),
+  };
+  else if (dueCards > 0) hero = { kicker: "Today", title: `${dueCards} flashcard${dueCards > 1 ? "s" : ""} due`, body: "A few minutes of repetition now means less cramming later.", cta: "Review cards", act: () => start("cards", ALL_SCOPE) };
+  else hero = { kicker: "Ready when you are", title: "Nothing urgent, so go deeper", body: "Pick a technique below and keep your notes fresh. Ten minutes beats a long night.", cta: null };
+  const others = upcoming.filter((u) => !(hero.more && u.t.id === next.t.id)).slice(0, 3);
+
   return (
-    <Scroll onRefresh={onRefresh}>
-      <h1 className="h1">Review</h1>
-      <p className="sub">
-        {section === "study" ? "Choose what to review, then how. A little each day beats one long night."
-          : section === "tasks" ? "Pick a quiz or study task to see shared notes, get a reviewer, practice, or flip flashcards."
-          : section === "weekly" ? "One page covering what the class worked on and learned each week."
-          : "Every note, upload and reviewer your class has stored."}
-      </p>
-      <Segmented value={section} onChange={setSection} tour="study-sections" options={[["study", "Study"], ["tasks", "By task"], ["weekly", "Weekly"], ["library", "Library"]]} />
-      {section === "study" && <div style={{ marginTop: 18 }}><StudyHub tasks={tasks} materials={materials} subjects={subjects} onInventory={onInventory} user={user} classQuarter={classQuarter} scope={scope} onSaved={onSaved} /></div>}
-      {section === "weekly" && <WeeklyReviewer key={startWs || "w"} initialWs={startWs} tasks={tasks} materials={materials} weeklies={weeklies} user={user} saveWeekly={saveWeekly} onInventory={onInventory} onStudy={goStudy} />}
-      {section === "library" && <Library tasks={tasks} materials={materials} user={user} subjects={subjects} onAddSubject={onAddSubject} addNote={addNote} removeMaterial={removeMaterial} relabelMaterial={relabelMaterial} onStudy={goStudy} onInventory={onInventory} />}
-      {section === "tasks" && (
-        <div style={{ marginTop: 14 }}>
-          <Segmented value={all ? "all" : "focus"} onChange={(v) => setAll(v === "all")} options={[["focus", "Quizzes and study"], ["all", "Everything"]]} />
-        </div>
-      )}
-      {section === "tasks" && list.length === 0 && <div className="empty"><div className="serif">No quizzes coming up</div>Switch to Everything to review any task.</div>}
-      <div style={{ marginTop: 14, display: section === "tasks" ? "block" : "none" }}>
-        {list.map((t) => {
-          const n = materials.filter((m) => m.taskId === t.id).length;
+    <div className="v3-study">
+      <section className="v3-hero" data-tone={!hasNotes ? "empty" : "go"}>
+        <span className="v3-kicker">{hero.kicker}</span>
+        <h2 className="serif">{hero.title}</h2>
+        <p>{hero.body}</p>
+        {(dueCards > 0 || weekSessions > 0) && hasNotes && (
+          <div className="v3-heroStats">
+            {dueCards > 0 && <span><b>{dueCards}</b> cards due</span>}
+            {weekSessions > 0 && <span><b>{weekSessions}</b> {weekSessions > 1 ? "sessions" : "session"} this week</span>}
+          </div>
+        )}
+        {hero.cta && (
+          <div className="v3-heroActs">
+            <button className="btn accent" disabled={!!prep} onClick={() => { Sound.play("tap"); hero.act(); }}>{hero.cta}<ArrowRight size={16} /></button>
+            {hero.more && <button className="btn ghost" onClick={hero.more}>Details</button>}
+          </div>
+        )}
+      </section>
+
+      <button className="v3-scope" data-tour="study-scope" onClick={() => { Sound.play("tap"); setScopeOpen(true); }} aria-haspopup="dialog">
+        <span className="v3-scopeIcon"><SlidersHorizontal size={18} /></span>
+        <span className="v3-scopeText">
+          <small>Reviewing</small>
+          <b>{focus ? `Only ${focusTitle || "this task"}` : scopeLine({ period, subjects: pick, topics: topicPick, q }).text}</b>
+        </span>
+        <span className="v3-scopeCount">
+          {q.trim() && !focus ? "searches all notes" : pool.length === 0 ? "no notes" : `${pool.length} ${pool.length === 1 ? "note" : "notes"}${ideaCount ? `, ${ideaCount} ideas` : ""}`}
+        </span>
+        <ChevronRight size={18} className="v3-scopeGo" />
+      </button>
+      {unread > 0 && !q.trim() && <p className="v3-hint">{unread} {unread === 1 ? "note is" : "notes are"} still to be read. That happens when you press Start.</p>}
+
+      <h2 className="v3-h">How do you want to study?</h2>
+      <div className="v3-techs" role="radiogroup" aria-label="Study technique">
+        {TECHS.map((t) => {
+          const Icon = TECH_ICON[t.id] || BookOpen;
           return (
-            <button key={t.id} className="row" onClick={() => { Sound.play("tap"); setSel(t.id); }}>
-              <div className="rowMain">
-                <div className="rowTitle">{t.title}</div>
-                <div className="rowMeta">
-                  <span><span className="dot" style={{ background: subjColor(t.subject) }} />{t.subject}</span>
-                  <span>{t.type}</span>
-                  <span>{n === 0 ? "No material yet" : n === 1 ? "1 item of material" : `${n} items of material`}</span>
-                </div>
-              </div>
-              <div className="rowRight"><div className={diffDays(t.deadline) < 0 ? "late" : ""}>{relLabel(t.deadline)}</div></div>
+            <button key={t.id} role="radio" aria-checked={techId === t.id} className="v3-tech" data-on={techId === t.id ? 1 : 0} disabled={!!prep}
+              onClick={() => { Sound.play("tap"); setTech(t.id); }}>
+              <span className="v3-techIcon"><Icon size={20} /></span>
+              <b>{t.name}</b>
+              {rec.includes(t.id) && <i className="v3-techRec" title="Suggested for now" />}
             </button>
           );
         })}
       </div>
+      <div className="v3-go" aria-live="polite">
+        <div className="v3-goText">
+          <div className="v3-goHead"><b className="serif">{T.name}</b><span>{T.time}</span>{rec.includes(T.id) && <em>Suggested</em>}</div>
+          <p>{T.tip}</p>
+        </div>
+        <button className="btn accent v3-goBtn" disabled={!!prep} onClick={() => { Sound.play("tap"); start(techId); }}>{prep ? <>Working<Dots /></> : <>Start<ArrowRight size={16} /></>}</button>
+      </div>
+      {prep && <div className="prepBar" role="status"><i /> {prep}<Dots /></div>}
+      {note && <p className="err" role="alert" style={{ marginTop: 14 }}>{note}</p>}
+
+      {others.length > 0 && (
+        <>
+          <h2 className="v3-h">Coming up</h2>
+          <div className="v3-up">
+            {others.map(({ t, n, ic }) => (
+              <button key={t.id} className="v3-upRow" onClick={() => { Sound.play("tap"); onOpenTask(t.id); }}>
+                <i className="dot" style={{ background: subjColor(t.subject) }} />
+                <span className="v3-upMain"><b>{t.title}</b><small>{t.subject}, {t.type}{n ? `, ${n} ${n === 1 ? "note" : "notes"}${ic ? `, ${ic} ideas` : ""}` : ", no notes yet"}</small></span>
+                <span className={`v3-upDue${diffDays(t.deadline) <= 1 ? " soon" : ""}`}>{relLabel(t.deadline)}</span>
+              </button>
+            ))}
+          </div>
+        </>
+      )}
+
+      <Sheet open={scopeOpen} onClose={() => setScopeOpen(false)} title="What to review">
+        {focus ? (
+          <div>
+            <p style={{ margin: "0 0 16px", lineHeight: 1.5 }}>Only the notes for <b>{focusTitle || "this task"}</b>.</p>
+            <button className="btn ghost full" onClick={() => { Sound.play("tap"); setFocus(null); }}>Review everything instead</button>
+          </div>
+        ) : (
+          <div>
+            <div className="v3-field">
+              <label>When</label>
+              <Segmented value={period} onChange={(v) => setPeriod(v)} options={PERIODS.map(([k, l]) => [k, l])} />
+              <p className="meta" style={{ margin: "8px 0 0" }}>{PERIODS.find((p) => p[0] === period)[2]}.</p>
+            </div>
+            <div className="v3-field">
+              <label>Subjects</label>
+              <div className="chips" style={{ flexWrap: "wrap", overflow: "visible", padding: 0 }}>
+                <button className="chip" aria-pressed={pick.length === 0} onClick={() => { Sound.play("tap"); setPick([]); setTopicPick([]); }}>Every subject</button>
+                {(subsWithNotes.length ? subsWithNotes : subjects).map((s) => (
+                  <button key={s} className="chip" aria-pressed={pick.includes(s)} onClick={() => { Sound.play("tap"); setPick((c) => (c.includes(s) ? c.filter((x) => x !== s) : [...c, s])); }}>
+                    <span className="dot" style={{ background: subjColor(s), margin: 0 }} />{s}
+                  </button>
+                ))}
+              </div>
+            </div>
+            {topics.length > 0 && (
+              <div className="v3-field">
+                <label>Topics {pick.length === 0 && <span className="v3-opt">pick a subject to narrow these</span>}</label>
+                <div className="chips" style={{ flexWrap: "wrap", overflow: "visible", padding: 0 }}>
+                  <button className="chip" aria-pressed={topicPick.length === 0} onClick={() => { Sound.play("tap"); setTopicPick([]); }}>Every topic</button>
+                  {topics.slice(0, 24).map((x) => (
+                    <button key={x.topic} className="chip" aria-pressed={topicPick.includes(x.topic)} onClick={() => { Sound.play("tap"); setTopicPick((c) => (c.includes(x.topic) ? c.filter((t) => t !== x.topic) : [...c, x.topic])); }}>{x.topic}</button>
+                  ))}
+                </div>
+              </div>
+            )}
+            <div className="v3-field">
+              <label htmlFor="sc-q">Or find a lesson by a word <span className="v3-opt">searches every note</span></label>
+              <input id="sc-q" className="input" value={q} onChange={(e) => setQ(e.target.value)} placeholder="quadratic, photosynthesis, Mandate of Heaven" />
+            </div>
+          </div>
+        )}
+        <div className="v3-sheetFoot">
+          <span className="meta">{q.trim() && !focus ? "Studying only the ideas that match." : pool.length === 0 ? "No notes in this selection yet." : `${pool.length} ${pool.length === 1 ? "note" : "notes"}${ideaCount ? `, ${ideaCount} key ideas` : ""}`}</span>
+          <button className="btn accent" onClick={() => { Sound.play("tap"); setScopeOpen(false); }}>Done</button>
+        </div>
+      </Sheet>
+    </div>
+  );
+}
+
+/* ───────────────────────── reviewers ─────────────────────────
+   A reviewer is written from the ideas in the class's notes. The assistant doesn't read everything: the database finds the
+   lessons for the chosen subject and topics (and an optional focus), and only those go into the reviewer. */
+
+function ReviewerBuilder({ open, onClose, preset, materials, subjects, onInventory, addNote, onMade }) {
+  const used = useMemo(() => [...new Set(materials.filter((m) => m.kind !== "ai").map((m) => m.subject))], [materials]);
+  const [subject, setSubject] = useState("");
+  const [tops, setTops] = useState([]);
+  const [focus, setFocus] = useState("");
+  const [busy, setBusy] = useState("");
+  const [err, setErr] = useState("");
+  useEffect(() => { if (open) { setSubject(preset?.subject || ""); setTops(preset?.topics || []); setFocus(""); setErr(""); } }, [open, preset?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+  const topicChoices = useMemo(() => topicList(materials.filter((m) => m.kind !== "ai"), subject ? [subject] : []), [materials, subject]);
+  const pool = materials.filter((m) => m.kind !== "ai" && m.subject === subject && (!tops.length || tops.includes(m.topic)));
+  const ready = pool.reduce((n, m) => n + (m.ic || 0), 0);
+  const build = async () => {
+    setErr(""); setBusy("Finding your notes");
+    try {
+      if (!pool.length) throw new Error("none");
+      await ensureInventory(pool.map((m) => ({ m, subject })), onInventory, setBusy, null);
+      setBusy("Collecting the key ideas");
+      const word = focus.trim();
+      let ideas = word ? await notes.findIdeas({ subjects: [subject], topics: tops, q: word, limit: 250, any: true }) : null;
+      if (!ideas || !ideas.length) ideas = await notes.findIdeas({ subjects: [subject], topics: tops, limit: 250 });
+      if (!ideas || !ideas.length) throw new Error("no ideas");
+      setBusy("Writing the reviewer");
+      const label = [subject, tops.join(", "), word && `focus: ${word}`].filter(Boolean).join(", ");
+      const out = await writeReviewer(label, ideas);
+      const id = uid();
+      const ok = await addNote({ id, title: `Reviewer: ${tops.length === 1 ? tops[0] : word || subject}`, text: out, kind: "ai", subject, topic: tops.length === 1 ? tops[0] : "" });
+      if (!ok) throw new Error("save");
+      Sound.play("bell");
+      setBusy("");
+      onClose();
+      onMade(id);
+    } catch (e) {
+      setBusy("");
+      setErr(e && e.message === "none" ? "There are no notes for that yet. Add some in Data first." : "The assistant couldn't write a reviewer just now. Try again in a moment.");
+      Sound.play("err");
+    }
+  };
+  return (
+    <Sheet open={open} onClose={() => { if (!busy) onClose(); }} title="Write a reviewer">
+      <p style={{ margin: "-4px 0 18px", color: "var(--muted)", lineHeight: 1.5 }}>Pick a subject and the assistant reads the class's notes for it, then writes one page that covers every key idea.</p>
+      <div className="v3-field">
+        <label>Subject</label>
+        <div className="chips" style={{ flexWrap: "wrap", overflow: "visible", padding: 0 }}>
+          {(used.length ? used : subjects).map((s) => (
+            <button key={s} className="chip" aria-pressed={subject === s} onClick={() => { Sound.play("tap"); setSubject(s); setTops([]); }}>
+              <span className="dot" style={{ background: subjColor(s), margin: 0 }} />{s}
+            </button>
+          ))}
+        </div>
+      </div>
+      {subject && topicChoices.length > 0 && (
+        <div className="v3-field">
+          <label>Topics <span className="v3-opt">leave empty for the whole subject</span></label>
+          <div className="chips" style={{ flexWrap: "wrap", overflow: "visible", padding: 0 }}>
+            {topicChoices.slice(0, 24).map((x) => (
+              <button key={x.topic} className="chip" aria-pressed={tops.includes(x.topic)} onClick={() => { Sound.play("tap"); setTops((c) => (c.includes(x.topic) ? c.filter((t) => t !== x.topic) : [...c, x.topic])); }}>{x.topic}</button>
+            ))}
+          </div>
+        </div>
+      )}
+      {subject && (
+        <div className="v3-field">
+          <label htmlFor="rb-focus">Focus on <span className="v3-opt">optional</span></label>
+          <input id="rb-focus" className="input" value={focus} maxLength={80} onChange={(e) => setFocus(e.target.value)} placeholder="a word or lesson the quiz will cover" />
+        </div>
+      )}
+      {subject && <p className="meta" style={{ margin: "0 0 14px" }}>{pool.length === 0 ? "No notes match yet." : `${pool.length} ${pool.length === 1 ? "note" : "notes"} will be read${ready ? `, ${ready} ideas ready` : ""}.`}</p>}
+      {err && <p className="err">{err}</p>}
+      <button className="btn accent full" disabled={!subject || pool.length === 0 || !!busy} onClick={build}>{busy ? <>{busy}<Dots /></> : <><Sparkles size={16} style={{ verticalAlign: -3, marginRight: 8 }} />Write my reviewer</>}</button>
+    </Sheet>
+  );
+}
+
+function ReviewerReader({ m, onBack, onStudy, removeMaterial }) {
+  const [copied, setCopied] = useState(false);
+  const { label } = kindMeta(m);
+  const copy = async () => {
+    const t = (await notes.text([m.id]))[m.id] || "";
+    const ok = await copyText(t);
+    setCopied(ok); if (ok) Sound.play("pop");
+    setTimeout(() => setCopied(false), 1800);
+  };
+  return (
+    <div className="v3-reader">
+      <button className="back" onClick={onBack}><ChevronLeft size={18} />Reviewers</button>
+      <div className="v3-tags" style={{ marginTop: 8 }}>
+        <span className="v3-tag"><i className="dot" style={{ background: subjColor(m.subject) }} />{m.subject}</span>
+        {m.topic && <span className="v3-tag">{m.topic}</span>}
+        <span className="v3-tag">{label}</span>
+      </div>
+      <h1 className="h1" style={{ marginTop: 10 }}>{m.title}</h1>
+      <p className="meta" style={{ margin: "0 0 18px" }}>By {m.mine ? "you" : m.by}, {timeAgo(m.at)}. Everyone in the class can read this.</p>
+      <div className="v3-readActs">
+        <button className="btn accent small" onClick={() => onStudy({ subjects: [m.subject], topics: m.topic ? [m.topic] : [], period: "final" })}>Study this</button>
+        <button className="btn ghost small" onClick={copy}><Copy size={14} />{copied ? "Copied" : "Copy"}</button>
+        {(m.mine || m.orphan) && <button className="btn ghost small" style={{ color: C.danger }} onClick={() => { removeMaterial(m.id); onBack(); }}><Trash2 size={14} />Remove</button>}
+      </div>
+      <NoteBody id={m.id} doc />
+    </div>
+  );
+}
+
+function ReviewersPane({ tasks, materials, weeklies, user, subjects, addNote, removeMaterial, saveWeekly, onInventory, onStudy, startWs, build, onDeep }) {
+  const thisWeek = weekStartOf(todayISO());
+  const [view, setView] = useState(startWs ? { type: "weekly", ws: startWs } : null);
+  const [building, setBuilding] = useState(!!build);
+  const [preset, setPreset] = useState(build || null);
+  useEffect(() => { if (build) { setPreset(build); setBuilding(true); } }, [build?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { if (onDeep) onDeep(!!view); return () => { if (onDeep) onDeep(false); }; }, [view]); // eslint-disable-line react-hooks/exhaustive-deps
+  const made = materials.filter((m) => m.kind === "ai" || m.kind === "reviewer").sort((a, b) => b.at - a.at);
+  const wk = weeklies.find((w) => w.weekStart === thisWeek);
+  const mine = made.find((m) => m.id === view?.id);
+  if (view?.type === "weekly") {
+    return <WeeklyReviewer key={view.ws} initialWs={view.ws} tasks={tasks} materials={materials} weeklies={weeklies} user={user} saveWeekly={saveWeekly} onInventory={onInventory} onStudy={onStudy} onBack={() => setView(null)} />;
+  }
+  if (view?.type === "note" && mine) return <ReviewerReader m={mine} onBack={() => setView(null)} onStudy={onStudy} removeMaterial={removeMaterial} />;
+  return (
+    <div className="v3-rev">
+      <div className="v3-revTop">
+        <button className="v3-card" onClick={() => { Sound.play("tap"); setView({ type: "weekly", ws: thisWeek }); }}>
+          <span className="v3-cardIcon"><CalendarDays size={20} /></span>
+          <span className="v3-cardText"><b>This week's reviewer</b><small>{wk ? `Ready, made by ${wk.by} ${timeAgo(wk.at)}` : "One page covering everything the class did this week"}</small></span>
+          <ChevronRight size={18} />
+        </button>
+        <button className="v3-card" data-accent="1" onClick={() => { Sound.play("tap"); setPreset(null); setBuilding(true); }}>
+          <span className="v3-cardIcon"><Sparkles size={20} /></span>
+          <span className="v3-cardText"><b>Write a reviewer</b><small>Pick a subject and topics, the assistant does the rest</small></span>
+          <ChevronRight size={18} />
+        </button>
+      </div>
+      <h2 className="v3-h">Saved reviewers {made.length > 0 && <small>{made.length}</small>}</h2>
+      {made.length === 0 ? (
+        <div className="empty"><div className="serif">No reviewers yet</div>Write one from your class's notes, or share one you made from the Data tab.</div>
+      ) : (
+        <div className="v3-list">
+          {made.map((m) => {
+            const { label, Icon } = kindMeta(m);
+            return (
+              <button key={m.id} className="v3-note" onClick={() => { Sound.play("tap"); setView({ type: "note", id: m.id }); }}>
+                <span className="v3-noteIcon" data-kind={m.kind}><Icon size={17} /></span>
+                <span className="v3-noteMain">
+                  <b>{m.title}</b>
+                  <span className="v3-noteMeta"><span><i className="dot" style={{ background: subjColor(m.subject) }} />{m.subject}</span>{m.topic && <span>{m.topic}</span>}<span>{label}</span><span>{timeAgo(m.at)}</span></span>
+                </span>
+                <ChevronRight size={16} className="v3-noteGo" />
+              </button>
+            );
+          })}
+        </div>
+      )}
+      <ReviewerBuilder open={building} onClose={() => setBuilding(false)} preset={preset} materials={materials} subjects={subjects} onInventory={onInventory} addNote={addNote}
+        onMade={(id) => setView({ type: "note", id })} />
+    </div>
+  );
+}
+
+/* ───────────────────────── the Review tab ───────────────────────── */
+
+function ReviewTab({ tasks, progress, materials, weeklies, saveWeekly, user, addNote, removeMaterial, onAddSubject, focusId, clearFocus, reviewStart, clearStart, onRefresh, subjects, onInventory, classQuarter, onSaved, onGoData }) {
+  const [sel, setSel] = useState(focusId || null);
+  const [section, setSection] = useState("study");
+  const [scope, setScope] = useState(null);
+  const [startWs, setStartWs] = useState(null);
+  const [build, setBuild] = useState(null);
+  const [deep, setDeep] = useState(false); // reading one reviewer: the page header steps aside
+  const goStudy = (o) => { Sound.play("tap"); setSel(null); setSection("study"); setScope({ ...o, id: uid() }); };
+  useEffect(() => {
+    if (!reviewStart) return;
+    setSel(null);
+    if (reviewStart.scope) goStudy(reviewStart.scope);
+    else setSection(reviewStart.section === "weekly" || reviewStart.section === "reviewers" ? "reviewers" : "study");
+    setStartWs(reviewStart.ws || null);
+    if (reviewStart.build) { setSection("reviewers"); setBuild({ ...reviewStart.build, id: uid() }); }
+    clearStart();
+  }, [reviewStart]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { if (focusId) { setSel(focusId); clearFocus(); } }, [focusId]); // eslint-disable-line react-hooks/exhaustive-deps
+  const task = tasks.find((t) => t.id === sel);
+  if (task) return <ReviewDetail task={task} user={user} materials={materials} subjects={subjects} onAddSubject={onAddSubject} addNote={addNote} removeMaterial={removeMaterial} onBack={() => setSel(null)} onStudy={goStudy} onInventory={onInventory} />;
+  return (
+    <Scroll onRefresh={onRefresh}>
+      {!(deep && section === "reviewers") && (
+        <>
+          <PageHead eyebrow="Study" title="Review" lede={section === "study" ? "Choose what to review, then how. A little each day beats one long night." : "Pages that pull a subject's notes together, written by the assistant or shared by classmates."} />
+          <Segmented value={section} onChange={setSection} tour="study-sections" options={[["study", "Study"], ["reviewers", "Reviewers"]]} />
+        </>
+      )}
+      <div style={{ marginTop: deep && section === "reviewers" ? 6 : 20 }}>
+        {section === "study" && <StudyHub tasks={tasks} progress={progress} materials={materials} subjects={subjects} onInventory={onInventory} user={user} classQuarter={classQuarter} scope={scope} onSaved={onSaved} onOpenTask={(id) => setSel(id)} onGoData={onGoData} />}
+        {section === "reviewers" && <ReviewersPane key={startWs || "r"} tasks={tasks} materials={materials} weeklies={weeklies} user={user} subjects={subjects} addNote={addNote} removeMaterial={removeMaterial} saveWeekly={saveWeekly} onInventory={onInventory} onStudy={goStudy} startWs={startWs} build={build} onDeep={setDeep} />}
+      </div>
     </Scroll>
   );
-}/* ───────────────────────── ask ───────────────────────── */
+}
+
+/* ───────────────────────── ask ───────────────────────── */
 
 function AskTab({ user, tasks, materials, progress, addTask }) {
   const [msgs, setMsgs] = useState([]);
@@ -5650,6 +6062,7 @@ export default function App() {
   const [classId, setClassId] = useState(null);
   const [classes, setClasses] = useState([]);
   const [reviewStart, setReviewStart] = useState(null);
+  const [dataOpen, setDataOpen] = useState(null);
   const classRef = useRef(null); classRef.current = classId;
   const [progress, setProgress] = useState({});
   const [tab, setTab] = useState("tasks");
@@ -5736,7 +6149,7 @@ export default function App() {
       // "g" then a letter jumps between tabs, like in GitHub or Gmail.
       if (gKey.current && Date.now() - gKey.current < 1200) {
         gKey.current = 0;
-        const dest = { t: "tasks", d: "done", r: "review", a: "ask" }[e.key.toLowerCase()];
+        const dest = { t: "tasks", d: "done", r: "review", l: "data", a: "ask" }[e.key.toLowerCase()];
         if (dest) { e.preventDefault(); Sound.play("tap"); setTab(dest); return; }
       }
       if (e.key === "g" || e.key === "G") { gKey.current = Date.now(); return; }
@@ -5816,7 +6229,7 @@ export default function App() {
       if (pf) {
         if (pf.ui) setUi((x) => ({ ...x, ...pf.ui }));
         if (pf.dismissedAnn) setDismissedAnn(pf.dismissedAnn);
-        if (pf.tab && ["tasks", "done", "review", "ask"].includes(pf.tab)) setTab(pf.tab);
+        if (pf.tab && ["tasks", "done", "review", "data", "ask"].includes(pf.tab)) setTab(pf.tab);
       }
       if (cache && cid) {
         // Instant open: show what we had last time, then quietly catch up.
@@ -6084,7 +6497,7 @@ export default function App() {
   const addTask = (t) => { ensureSubject(t.subject); return mutate("tasks", setTasks, (c) => [...c, t]); };
   const updateTask = (t) => { ensureSubject(t.subject); return mutate("tasks", setTasks, (c) => c.map((x) => (x.id === t.id ? t : x))); };
   const deleteTask = (id) => {
-    // Notes and uploads stay in the Library even after the task is gone.
+    // Notes and uploads stay in Data even after the task is gone.
     const task = tasks.find((t) => t.id === id);
     mutate("tasks", setTasks, (c) => c.filter((x) => x.id !== id));
     Sound.play("rip");
@@ -6100,10 +6513,13 @@ export default function App() {
     const subject = (n.subject || "").trim() || "General";
     const topic = normTopic(n.topic);
     const text = String(n.text || "").slice(0, MAX_BODY);
-    const ok = await notes.add({ id, classId: classRef.current, author: user, subject, topic, title: n.title, text, kind: n.kind || "upload", taskId: n.taskId, taskTitle: n.taskTitle });
-    if (!ok) { setSyncErr(true); return false; }
+    // an upload keeps its original file in the class's storage (best effort: the note is saved from its text either way)
+    let file = n.file || null;
+    if (!file && n.fileObj) { if (n.onProgress) n.onProgress("Keeping the original"); file = await notes.uploadFile(classRef.current, id, n.fileObj); }
+    const ok = await notes.add({ id, classId: classRef.current, author: user, subject, topic, title: n.title, text, kind: n.kind || "upload", taskId: n.taskId, taskTitle: n.taskTitle, file });
+    if (!ok) { if (file && !n.file) notes.removeFile(file.path); setSyncErr(true); return false; }
     ensureSubject(subject);
-    const meta = { id, taskId: n.taskId || null, title: String(n.title || "Untitled notes").slice(0, 120), by: user, kind: n.kind || "upload", at: Date.now(), subject, topic, taskTitle: n.taskTitle || "", n: text.length, ic: 0, src: null, mine: true, orphan: false };
+    const meta = { id, file, taskId: n.taskId || null, title: String(n.title || "Untitled notes").slice(0, 120), by: user, kind: n.kind || "upload", at: Date.now(), subject, topic, taskTitle: n.taskTitle || "", n: text.length, ic: 0, src: null, mine: true, orphan: false };
     setMaterials((c) => [meta, ...c.filter((x) => x.id !== id)]);
     if (meta.kind !== "ai") {
       Sound.play("add");
@@ -6125,7 +6541,10 @@ export default function App() {
     if (!ok) { showToast("Couldn't remove that just now. Only the person who added it can."); return; }
     setMaterials((c) => c.filter((x) => x.id !== id));
     Sound.play("rip");
-    showToast("Material removed", () => addNote({ id, title: m.title, text: body, subject: m.subject, topic: m.topic, kind: m.kind, taskId: m.taskId, taskTitle: m.taskTitle }));
+    // the original file is kept for the Undo window, then cleared from storage unless the note came back
+    let undone = false;
+    if (m.file) setTimeout(() => { if (!undone) notes.removeFile(m.file.path); }, 15000);
+    showToast("Material removed", () => { undone = true; return addNote({ id, title: m.title, text: body, subject: m.subject, topic: m.topic, kind: m.kind, taskId: m.taskId, taskTitle: m.taskTitle, file: m.file }); });
   };
   const addComment = (taskId, text) => {
     Sound.play("send");
@@ -6286,6 +6705,7 @@ export default function App() {
     ["tasks", "Tasks", ListChecks],
     ["done", "Done", CheckCheck],
     ["review", "Review", BookOpen],
+    ["data", "Data", Database],
     ["ask", "Ask", MessageCircle],
   ];
   const isDemo = detail?.id === DEMO_ID;
@@ -6344,7 +6764,7 @@ export default function App() {
                 <Trash2 size={14} style={{ verticalAlign: -2, marginRight: 6 }} />{confirmDel ? "Tap again to delete" : "Delete"}
               </button>
             </div>
-            {confirmDel && <p style={{ fontSize: 13, color: C.muted, marginTop: 12 }}>This removes it for the whole class. Its notes stay in the Library, and you can undo right after.</p>}
+            {confirmDel && <p style={{ fontSize: 13, color: C.muted, marginTop: 12 }}>This removes it for the whole class. Its notes stay in Data, and you can undo right after.</p>}
             <Comments taskId={detail.id} comments={comments} user={user} isAdmin={isAdmin} onAdd={addComment} onRemove={removeComment} />
             </>}
           </div>
@@ -6409,8 +6829,13 @@ export default function App() {
           )}
           {tab === "review" && (
             <ReviewTab tasks={tasks} progress={progress} materials={materials} weeklies={weeklies} saveWeekly={saveWeekly} reviewStart={reviewStart} clearStart={() => setReviewStart(null)} user={user} addNote={addNote}
-              removeMaterial={removeMaterial} relabelMaterial={relabelMaterial} onAddSubject={setSubject} focusId={reviewFocus} clearFocus={() => setReviewFocus(null)} onRefresh={() => refresh(true)} subjects={subjects} onInventory={markInventory} classQuarter={classQuarter}
+              removeMaterial={removeMaterial} relabelMaterial={relabelMaterial} onAddSubject={setSubject} focusId={reviewFocus} clearFocus={() => setReviewFocus(null)} onRefresh={() => refresh(true)} subjects={subjects} onInventory={markInventory} classQuarter={classQuarter} onGoData={() => setTab("data")}
               onSaved={(ok) => setSyncErr(!ok)} />
+          )}
+          {tab === "data" && (
+            <DataTab tasks={tasks} materials={materials} subjects={subjects} onAddSubject={setSubject} addNote={addNote} removeMaterial={removeMaterial} relabelMaterial={relabelMaterial}
+              onStudy={(scope) => { setReviewStart({ scope }); setTab("review"); }} onReviewer={(build) => { setReviewStart({ build }); setTab("review"); }}
+              onRefresh={() => refresh(true)} openId={dataOpen} clearOpen={() => setDataOpen(null)} />
           )}
           {tab === "ask" && <AskTab user={user} tasks={tasks} materials={materials} progress={progress} addTask={(t) => { Sound.play("add"); addTask({ quarter: defQuarter, ...t }); }} />}
           </ErrorBoundary>
@@ -6497,7 +6922,7 @@ export default function App() {
         {searchOpen && (
           <SearchPanel tasks={tasks} materials={materials}
             onTask={(id) => { setSearchOpen(false); setConfirmDel(false); setDetailId(id); }}
-            onMaterial={(m) => { setSearchOpen(false); if (m.taskId && tasks.some((t) => t.id === m.taskId)) setReviewFocus(m.taskId); else setReviewStart({ section: "library" }); setTab("review"); }} />
+            onMaterial={(m) => { setSearchOpen(false); if (m.taskId && tasks.some((t) => t.id === m.taskId)) setReviewFocus(m.taskId); else { setDataOpen(m.id); setTab("data"); return; } setTab("review"); }} />
         )}
       </Sheet>
       <Sheet open={menu} onClose={() => setMenu(false)} title="Account">

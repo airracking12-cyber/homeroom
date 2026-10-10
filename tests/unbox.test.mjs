@@ -11,7 +11,7 @@ const tokens = [...src.match(/const UNBOX_TOKENS = \[([\s\S]*?)\];/)[1].matchAll
 test("every unbox token is in the markup", () => {
   assert.ok(tokens.length > 10, "found the token list");
   // tabs and pages are tagged from a template: t-<tab> on the nav buttons, p-<tab> on the page
-  const dynamic = { "t-": { tabs: ["tasks", "done", "review", "ask"], tpl: "`t-${k}`" }, "p-": { tabs: ["done", "review", "ask"], tpl: "`p-${tab}`" } };
+  const dynamic = { "t-": { tabs: ["tasks", "done", "review", "data", "ask"], tpl: "`t-${k}`" }, "p-": { tabs: ["done", "review", "data", "ask"], tpl: "`p-${tab}`" } };
   const missing = tokens.filter((t) => {
     if (src.includes(`data-rv="${t}"`)) return false;
     const d = dynamic[t.slice(0, 2)];

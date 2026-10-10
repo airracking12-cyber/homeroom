@@ -7,7 +7,9 @@
 // createNotes(supabase) takes the database client as a parameter so it can be tested with a fake one.
 
 export const MAX_BODY = 120000; // characters per note (the database enforces the same cap)
-const SUMMARY = "id,class_id,owner,author,subject,topic,title,kind,task_id,task_title,n,ideas_n,ideas_src,created_at";
+const SUMMARY_OLD = "id,class_id,owner,author,subject,topic,title,kind,task_id,task_title,n,ideas_n,ideas_src,created_at";
+const SUMMARY = SUMMARY_OLD + ",file_name,file_type,file_size,file_path"; // v30: the original upload, kept alongside its text
+export const FILE_BUCKET = "class-notes";
 const IN_CHUNK = 40; // note ids per request, so the web address stays short
 const PAGE = 1000; // the database returns at most this many rows per request
 
@@ -33,7 +35,12 @@ export const toMaterial = (r, me) => ({
   src: r.ideas_src || null, // "ai" or "local"
   mine: !!me && r.owner === me,
   orphan: r.owner == null, // from before notes had owners: any classmate may tidy it away
+  file: r.file_path ? { path: r.file_path, name: r.file_name || "original", type: r.file_type || "", size: r.file_size || 0 } : null,
 });
+
+// The name a file gets in storage: safe characters only, so odd file names can never break the path.
+export const safeName = (name) => String(name || "file").normalize("NFKD").replace(/[^\w.\-]+/g, "_").replace(/^_+|_+$/g, "").slice(-80) || "file";
+export const filePathFor = (classId, noteId, name) => `${classId}/${noteId}/${safeName(name)}`;
 
 // "photosynthesis ", "Photosynthesis" and "photo  synthesis"-style duplicates become one topic.
 export const normTopic = (s) => String(s || "").replace(/\s+/g, " ").trim().slice(0, 60);
@@ -88,9 +95,11 @@ export function createNotes(supabase) {
     async list(classId) {
       if (!classId) return [];
       const uid = await me();
-      const { data, error } = await readAll(() =>
-        supabase.from("notes").select(SUMMARY).eq("class_id", classId).order("created_at", { ascending: false }).order("id")
+      const ask = (cols) => readAll(() =>
+        supabase.from("notes").select(cols).eq("class_id", classId).order("created_at", { ascending: false }).order("id")
       );
+      let { data, error } = await ask(SUMMARY);
+      if (error) ({ data, error } = await ask(SUMMARY_OLD)); // v30 not run yet: no file columns, everything else works
       if (error) { console.error("notes list failed", error); return null; }
       return data.map((r) => toMaterial(r, uid));
     },
@@ -108,7 +117,9 @@ export function createNotes(supabase) {
       return out;
     },
 
-    // Saves a new note. Returns true when the database accepted it.
+    // Saves a new note. Returns true when the database accepted it. A note may carry its original file (n.file, already in
+    // storage). If the database hasn't had the v30 upgrade yet, the note is still saved, just without the file link and
+    // (for a student-made reviewer) as an ordinary upload.
     async add(n) {
       const body = String(n.text || "").slice(0, MAX_BODY);
       const row = {
@@ -116,10 +127,38 @@ export function createNotes(supabase) {
         title: String(n.title || "Untitled notes").slice(0, 120), body, kind: n.kind || "upload",
         task_id: n.taskId || null, task_title: n.taskTitle ? String(n.taskTitle).slice(0, 200) : null,
       };
-      const { error } = await supabase.from("notes").insert(row);
+      const withFile = n.file ? { ...row, file_path: n.file.path, file_name: String(n.file.name).slice(0, 200), file_type: String(n.file.type || "").slice(0, 100), file_size: n.file.size || 0 } : row;
+      let { error } = await supabase.from("notes").insert(withFile);
+      if (error && n.file) ({ error } = await supabase.from("notes").insert(row)); // no file columns yet
+      if (error && row.kind === "reviewer") ({ error } = await supabase.from("notes").insert({ ...row, kind: "upload" })); // old kind list
       if (error) { console.error("note save failed", error); return false; }
       text.set(n.id, body);
       return true;
+    },
+
+    // Keeps the original file of an upload (a PDF or photo) in the class's private storage. Returns { path, name, type, size },
+    // or null if it couldn't be stored (the note is still saved from its text).
+    async uploadFile(classId, noteId, file) {
+      try {
+        const path = filePathFor(classId, noteId, file.name);
+        const { error } = await supabase.storage.from(FILE_BUCKET).upload(path, file, { contentType: file.type || undefined, upsert: false });
+        if (error) { console.warn("original file not stored", error); return null; }
+        return { path, name: file.name, type: file.type || "", size: file.size || 0 };
+      } catch (e) { console.warn("original file not stored", e); return null; }
+    },
+
+    // A link to the original that works for five minutes (the storage is private).
+    async fileUrl(path) {
+      try {
+        const { data, error } = await supabase.storage.from(FILE_BUCKET).createSignedUrl(path, 300);
+        if (error || !data) return null;
+        return data.signedUrl || null;
+      } catch { return null; }
+    },
+
+    async removeFile(path) {
+      if (!path) return;
+      try { await supabase.storage.from(FILE_BUCKET).remove([path]); } catch (e) { console.warn("[Homeroom] non-fatal:", e); }
     },
 
     async remove(id) {

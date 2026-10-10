@@ -1,0 +1,103 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 160 220" width="200" height="220" preserveAspectRatio="none">
+  <defs>
+    <!-- maple knob -->
+    <radialGradient id="knob" cx="38%" cy="30%" r="80%">
+      <stop offset="0" stop-color="#f0c999"/><stop offset=".38" stop-color="#d9a46c"/><stop offset=".78" stop-color="#b57a42"/><stop offset="1" stop-color="#8b5a2b"/>
+    </radialGradient>
+    <radialGradient id="knobShade" cx="50%" cy="38%" r="70%">
+      <stop offset=".55" stop-color="#3a1f0a" stop-opacity="0"/><stop offset="1" stop-color="#3a1f0a" stop-opacity=".38"/>
+    </radialGradient>
+    <linearGradient id="knobUnder" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#000" stop-opacity="0"/><stop offset="1" stop-color="#2b1606" stop-opacity=".45"/>
+    </linearGradient>
+    <radialGradient id="spec" cx="50%" cy="50%" r="50%">
+      <stop offset="0" stop-color="#fff" stop-opacity=".85"/><stop offset=".55" stop-color="#fff" stop-opacity=".18"/><stop offset="1" stop-color="#fff" stop-opacity="0"/>
+    </radialGradient>
+    <ellipse cx="80" cy="88" rx="22" ry="3.4" fill="#2b1606" opacity=".38" filter="url(#soft2)"/>
+  <!-- neck -->
+    <linearGradient id="neck" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#6a3f1d"/><stop offset=".22" stop-color="#b57a42"/><stop offset=".42" stop-color="#e0b27c"/><stop offset=".62" stop-color="#b57a42"/><stop offset="1" stop-color="#5a3316"/>
+    </linearGradient>
+    <!-- brass ring -->
+    <linearGradient id="brass" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#f7e3a1"/><stop offset=".18" stop-color="#e9c46a"/><stop offset=".5" stop-color="#b98a2e"/><stop offset=".78" stop-color="#8a621b"/><stop offset="1" stop-color="#c9a24a"/>
+    </linearGradient>
+    <linearGradient id="brassSide" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#000" stop-opacity=".42"/><stop offset=".18" stop-color="#000" stop-opacity="0"/><stop offset=".72" stop-color="#fff" stop-opacity=".0"/><stop offset="1" stop-color="#000" stop-opacity=".38"/>
+    </linearGradient>
+    <ellipse cx="80" cy="134.6" rx="36" ry="3.2" fill="#120904" opacity=".42" filter="url(#soft2)"/>
+  <!-- walnut block -->
+    <linearGradient id="block" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#9b6a42"/><stop offset=".12" stop-color="#7d5030"/><stop offset=".7" stop-color="#5e3a22"/><stop offset="1" stop-color="#45291a"/>
+    </linearGradient>
+    <linearGradient id="blockSide" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#1a0d05" stop-opacity=".5"/><stop offset=".14" stop-color="#1a0d05" stop-opacity="0"/><stop offset=".62" stop-color="#fff" stop-opacity=".07"/><stop offset=".86" stop-color="#1a0d05" stop-opacity="0"/><stop offset="1" stop-color="#1a0d05" stop-opacity=".55"/>
+    </linearGradient>
+    <!-- rubber die -->
+    <linearGradient id="rubber" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#4a4a4e"/><stop offset=".16" stop-color="#2b2b2e"/><stop offset="1" stop-color="#171719"/>
+    </linearGradient>
+    <linearGradient id="inkEdge" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#2f5566" stop-opacity="0"/><stop offset=".55" stop-color="#2f5566" stop-opacity=".85"/><stop offset="1" stop-color="#244658"/>
+    </linearGradient>
+    <!-- wood grain -->
+    <filter id="grainKnob" x="0" y="0" width="100%" height="100%">
+      <feTurbulence type="fractalNoise" baseFrequency="0.018 0.22" numOctaves="4" seed="7" result="n"/>
+      <feColorMatrix in="n" type="matrix" values="0 0 0 0 .32  0 0 0 0 .17  0 0 0 0 .05  0 0 0 1.6 -.55"/>
+    </filter>
+    <filter id="grainBlock" x="0" y="0" width="100%" height="100%">
+      <feTurbulence type="fractalNoise" baseFrequency="0.012 0.34" numOctaves="4" seed="3" result="n"/>
+      <feColorMatrix in="n" type="matrix" values="0 0 0 0 .13  0 0 0 0 .06  0 0 0 0 .02  0 0 0 1.9 -.7"/>
+    </filter>
+    <filter id="soft"><feGaussianBlur stdDeviation=".6"/></filter>
+    <filter id="soft2"><feGaussianBlur stdDeviation="1.4"/></filter>
+    <clipPath id="knobClip"><path d="M24 74 C19 40 45 8 80 8 C115 8 141 40 136 74 C136 82 128 86 119 86 L41 86 C32 86 24 82 24 74 Z"/></clipPath>
+    <clipPath id="neckClip"><path d="M63 86 C66 98 66 110 61 122 L99 122 C94 110 94 98 97 86 Z"/></clipPath>
+    <clipPath id="blockClip"><path d="M30 134 Q30 130 36 130 L124 130 Q130 130 130 134 L137 176 Q137 184 129 184 L31 184 Q23 184 23 176 Z"/></clipPath>
+  </defs>
+
+  <!-- knob -->
+  <path d="M24 74 C19 40 45 8 80 8 C115 8 141 40 136 74 C136 82 128 86 119 86 L41 86 C32 86 24 82 24 74 Z" fill="url(#knob)"/>
+  <g clip-path="url(#knobClip)">
+    <rect x="0" y="0" width="160" height="100" filter="url(#grainKnob)" style="mix-blend-mode:multiply" opacity=".7"/>
+    <rect x="0" y="0" width="160" height="100" fill="url(#knobShade)"/>
+    <rect x="0" y="52" width="160" height="40" fill="url(#knobUnder)"/>
+  </g>
+  <path d="M30 76 C26 44 50 14 80 14" fill="none" stroke="#fff" stroke-opacity=".28" stroke-width="2" stroke-linecap="round" filter="url(#soft)"/>
+  <ellipse cx="60" cy="32" rx="24" ry="11" fill="url(#spec)" transform="rotate(-28 60 32)"/>
+  <ellipse cx="50" cy="26" rx="6" ry="3" fill="#fff" fill-opacity=".8" transform="rotate(-30 50 26)" filter="url(#soft)"/>
+  <path d="M32 80 C60 90 100 90 128 80" fill="none" stroke="#2b1606" stroke-opacity=".28" stroke-width="2.4" stroke-linecap="round" filter="url(#soft)"/>
+
+  <ellipse cx="80" cy="88" rx="22" ry="3.4" fill="#2b1606" opacity=".38" filter="url(#soft2)"/>
+  <!-- neck -->
+  <path d="M63 86 C66 98 66 110 61 122 L99 122 C94 110 94 98 97 86 Z" fill="url(#neck)"/>
+  <g clip-path="url(#neckClip)">
+    <rect x="50" y="84" width="60" height="40" filter="url(#grainKnob)" style="mix-blend-mode:multiply" opacity=".5"/>
+    <path d="M60 97 H100 M60 105 H100" stroke="#3a1f0a" stroke-opacity=".38" stroke-width="1.3"/>
+    <path d="M60 98.4 H100 M60 106.4 H100" stroke="#fff" stroke-opacity=".22" stroke-width=".8"/>
+  </g>
+
+  <!-- brass ring -->
+  <rect x="46" y="119" width="68" height="14" rx="6" fill="url(#brass)"/>
+  <rect x="46" y="119" width="68" height="14" rx="6" fill="url(#brassSide)"/>
+  <path d="M52 121.4 H108" stroke="#fffbe6" stroke-opacity=".85" stroke-width="1.6" stroke-linecap="round" filter="url(#soft)"/>
+  <path d="M50 131.2 H110" stroke="#4a3208" stroke-opacity=".5" stroke-width="1.4" stroke-linecap="round"/>
+
+  <ellipse cx="80" cy="134.6" rx="36" ry="3.2" fill="#120904" opacity=".42" filter="url(#soft2)"/>
+  <!-- walnut block -->
+  <path d="M30 134 Q30 130 36 130 L124 130 Q130 130 130 134 L137 176 Q137 184 129 184 L31 184 Q23 184 23 176 Z" fill="url(#block)"/>
+  <g clip-path="url(#blockClip)">
+    <rect x="10" y="126" width="140" height="62" filter="url(#grainBlock)" style="mix-blend-mode:multiply" opacity=".85"/>
+    <rect x="10" y="126" width="140" height="62" fill="url(#blockSide)"/>
+    <path d="M26 133 H134" stroke="#ffe9c9" stroke-opacity=".5" stroke-width="1.6" stroke-linecap="round" filter="url(#soft)"/>
+    <path d="M22 180 H138" stroke="#120904" stroke-opacity=".55" stroke-width="3" filter="url(#soft2)"/>
+  </g>
+  <path d="M30.5 132 Q31 130.6 36 130.6 L124 130.6 Q129 130.6 129.5 132" fill="none" stroke="#fff3df" stroke-opacity=".5" stroke-width=".9"/>
+
+  <!-- rubber die with ink on its edge -->
+  <path d="M30 184 H130 V199 Q130 206 123 206 H37 Q30 206 30 199 Z" fill="url(#rubber)"/>
+  <path d="M30 184 H130 V199 Q130 206 123 206 H37 Q30 206 30 199 Z" fill="url(#inkEdge)" opacity=".0"/>
+  <path d="M31 196 H129 V199 Q129 205 123 205 H37 Q31 205 31 199 Z" fill="url(#inkEdge)"/>
+  <path d="M32 185.6 H128" stroke="#fff" stroke-opacity=".28" stroke-width="1.2" stroke-linecap="round" filter="url(#soft)"/>
+  <path d="M36 205.4 H124" stroke="#9fc0cd" stroke-opacity=".35" stroke-width="1" stroke-linecap="round"/>
+</svg>

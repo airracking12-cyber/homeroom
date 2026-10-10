@@ -1,5 +1,7 @@
 // The first-run ticket: blank white, stamp it, tear off the stub, then take off.
 // The visible flow is BLANK > STAMP > TEAR; the plane and the walkthrough are in PlaneFlight.jsx and the Tour (App.jsx).
+// The stamp (a wooden hand stamp, its shadow and the ink it leaves) is in Stamp.jsx. It hovers over the ticket and can be pressed
+// directly, or the big "Check in" button can be used (holding either one presses the stamp lower, letting go stamps).
 //
 // Props (a drop-in for the old BoardingPass):
 //   classes, setClasses, classPicker(value, onPick)  the class chooser lives in App.jsx, so it is handed in
@@ -13,6 +15,7 @@ import { useEffect, useReducer, useRef, useState } from "react";
 import { AnimatePresence, animate, motion, useMotionValue, useReducedMotion, useTransform } from "motion/react";
 import { Plane } from "lucide-react";
 import { EVENT, PHASE, reduce, tearCompletes } from "./machine.js";
+import { Impression, StampButton, StampShadow, TIMING, useStampPose } from "./Stamp.jsx";
 
 const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
 const buzz = (p) => { try { if (navigator.vibrate) navigator.vibrate(p); } catch { /* not supported */ } };
@@ -33,57 +36,6 @@ const zig = (top) => {
 const BODY_TORN = zig(false);
 const STUB_TORN = zig(true);
 
-function StampTool({ disabled }) {
-  return (
-    <svg viewBox="0 0 80 112" width="80" height="112" aria-hidden="true" focusable="false">
-      <ellipse cx="40" cy="106" rx="30" ry="4.5" fill="rgba(31,30,27,.16)" />
-      <rect x="10" y="84" width="60" height="18" rx="6" fill="#3a3834" />
-      <rect x="14" y="98" width="52" height="7" rx="3.5" fill="var(--ob-stamp)" opacity={disabled ? 0.35 : 0.9} />
-      <path d="M31 84V56c0-6 4-9 9-9s9 3 9 9v28Z" fill="#5a5750" />
-      <rect x="22" y="76" width="36" height="9" rx="4.5" fill="#46433d" />
-      <circle cx="40" cy="26" r="20" fill="#d9a07f" />
-      <circle cx="40" cy="26" r="20" fill="url(#obKnob)" />
-      <defs>
-        <radialGradient id="obKnob" cx="35%" cy="28%" r="75%">
-          <stop offset="0" stopColor="#fff" stopOpacity=".55" />
-          <stop offset=".5" stopColor="#fff" stopOpacity="0" />
-          <stop offset="1" stopColor="#000" stopOpacity=".18" />
-        </radialGradient>
-      </defs>
-      <ellipse cx="32" cy="17" rx="7" ry="4" fill="#fff" opacity=".45" transform="rotate(-30 32 17)" />
-    </svg>
-  );
-}
-
-function Ink({ gate, date }) {
-  return (
-    <svg viewBox="0 0 132 132" width="132" height="132" aria-hidden="true" focusable="false">
-      <defs>
-        <filter id="obRough" x="-10%" y="-10%" width="120%" height="120%">
-          <feTurbulence type="fractalNoise" baseFrequency=".9" numOctaves="2" seed="4" result="n" />
-          <feDisplacementMap in="SourceGraphic" in2="n" scale="2.2" />
-        </filter>
-        <filter id="obWorn">
-          <feTurbulence type="fractalNoise" baseFrequency=".6" numOctaves="3" seed="9" result="t" />
-          <feColorMatrix in="t" type="matrix" values="0 0 0 0 0  0 0 0 0 0  0 0 0 0 0  0 0 0 -2.2 1.7" result="m" />
-          <feComposite in="SourceGraphic" in2="m" operator="in" />
-        </filter>
-        <path id="obArcTop" d="M 20 66 A 46 46 0 0 1 112 66" />
-        <path id="obArcBot" d="M 14 66 A 52 52 0 0 0 118 66" />
-      </defs>
-      <g filter="url(#obWorn)"><g filter="url(#obRough)" fill="none" stroke="var(--ob-stamp)" style={{ color: "var(--ob-stamp)" }}>
-        <circle cx="66" cy="66" r="60" strokeWidth="3.4" />
-        <circle cx="66" cy="66" r="53" strokeWidth="1.2" />
-        <circle cx="66" cy="66" r="31" strokeWidth="1.2" />
-        <text fill="currentColor" stroke="none" fontSize="10.5" fontWeight="700" letterSpacing="2.6" textAnchor="middle" fontFamily="Inter,sans-serif"><textPath href="#obArcTop" startOffset="50%">HOMEROOM AIR</textPath></text>
-        <text fill="currentColor" stroke="none" fontSize="10" fontWeight="700" letterSpacing="2.4" textAnchor="middle" fontFamily="Inter,sans-serif"><textPath href="#obArcBot" startOffset="50%" side="right">CHECKED IN</textPath></text>
-        <text x="66" y="73" fill="currentColor" stroke="none" fontSize="23" fontWeight="500" textAnchor="middle" fontFamily="Fraunces,Georgia,serif">{gate}</text>
-        <text x="66" y="86" fill="currentColor" stroke="none" fontSize="7.5" fontWeight="600" letterSpacing="1" textAnchor="middle" fontFamily="Inter,sans-serif">{date}</text>
-      </g></g>
-    </svg>
-  );
-}
-
 export default function Onboarding({
   classes, classPicker, replay, name, classLabel, onSubmit, onTakeoff, onSignOut, onSkip, sound,
 }) {
@@ -93,10 +45,14 @@ export default function Onboarding({
   const [cls, setCls] = useState(null);
   const [err, setErr] = useState("");
   const [busy, setBusy] = useState(false);
+  const [nudge, setNudge] = useState(""); // which field is being pointed at: "name" or "class"
+  const nameRef = useRef(null);
+  const classRef = useRef(null);
   const [inked, setInked] = useState(false); // the stamp has landed
   const [torn, setTorn] = useState(false); // the stub has come away
   const [gone, setGone] = useState(false); // the ticket is leaving
   const [dragging, setDragging] = useState(false);
+  const [tilt] = useState(() => -(7 + Math.floor(Math.random() * 8))); // each stamping lands a little differently
   const timers = useRef([]);
   const later = (fn, ms) => { timers.current.push(setTimeout(fn, ms)); };
   useEffect(() => () => timers.current.forEach(clearTimeout), []);
@@ -106,6 +62,7 @@ export default function Onboarding({
   const nameOk = /^[a-z0-9_.]{3,20}$/.test(u);
   const gate = replay ? classLabel : (classes.find((c) => c.id === cls) || {}).label;
   const ready = replay || (nameOk && !!cls);
+  const stampPose = useStampPose(ready && !busy, inked);
   const gateCode = (gate || "").replace(/[^A-Za-z0-9]/g, "").slice(0, 3).toUpperCase() || "---";
   const [today] = useState(() => new Date().toLocaleDateString("en-US", { month: "short", day: "numeric" }));
 
@@ -123,18 +80,33 @@ export default function Onboarding({
     return () => window.removeEventListener("keydown", k);
   }, [replay, phase, torn, onSkip]);
 
-  // 2. STAMP: press the stamp.
+  // 2. STAMP: tap "Check in" (or press the stamp itself). Neither is ever dead: if something is missing, they point at the
+  // field and say what to do. Otherwise the stamp comes down by itself, so there is nothing small or moving to aim at.
+  const missing = !replay && (!nameOk ? "name" : !cls ? "class" : "");
+  const point = (what) => {
+    setNudge(what); play("err"); buzz(12);
+    if (what === "name" && nameRef.current) nameRef.current.focus({ preventScroll: false });
+    if (what === "class" && classRef.current && classRef.current.scrollIntoView) classRef.current.scrollIntoView({ block: "center", behavior: calm ? "auto" : "smooth" });
+    later(() => setNudge(""), 900);
+  };
   const stamp = async () => {
-    if (!ready || busy || inked || phase !== PHASE.STAMP) return;
+    if (busy || inked || phase !== PHASE.STAMP) return;
     setErr("");
+    if (missing) { point(missing); return; }
     if (!replay) {
       setBusy(true);
       const e = await onSubmit(u, cls);
       setBusy(false);
       if (e) { setErr(e); play("err"); return; }
     }
-    setInked(true); play("stamp"); buzz([14, 30, 10]);
-    later(() => send(EVENT.STAMPED), calm ? 400 : 1100);
+    setInked(true);
+    const thump = () => { play("stamp"); buzz([14, 30, 10]); };
+    if (calm) thump();
+    else {
+      later(thump, TIMING.contact * 1000); // the sound lands when the rubber does
+      later(() => play("lift"), TIMING.lift * 1000); // and the peel as the stamp lifts
+    }
+    later(() => send(EVENT.STAMPED), calm ? 400 : TIMING.total * 1000 + 100);
   };
 
   // 3. TEAR: drag the stub along the perforation.
@@ -185,11 +157,14 @@ export default function Onboarding({
 
   const tearing = dragging || torn;
   const showTicket = phase !== PHASE.BLANK;
-  const heading = torn ? "Boarding now" : phase === PHASE.TEAR ? "Tear off the stub" : "Stamp the ticket";
+  const heading = torn ? "Boarding now" : phase === PHASE.TEAR ? "Tear off the stub" : inked ? "Checked in" : "Check in";
   const sub = torn ? "Safe travels."
-    : phase === PHASE.TEAR ? "Pull it along the dotted line."
-      : inked ? "You're checked in."
-        : replay ? "Press the stamp." : ready ? "Press the stamp to check in." : "Add your name and class, then press the stamp.";
+    : phase === PHASE.TEAR ? "Swipe the stub along the dotted line, or just tap the button."
+      : inked ? "Stamping your ticket."
+        : replay ? "Press the stamp, or tap the button." : "Pick a name and your class, then press the stamp or tap the button.";
+  const checklist = phase === PHASE.STAMP && !replay && !inked
+    ? (missing === "name" ? (uname ? "Your name needs 3 to 20 letters, numbers, dots or underscores." : "Type a name your classmates will see.") : missing === "class" ? "Now pick your class above." : "")
+    : "";
 
   return (
     <div className="ob" data-phase={phase} role={replay ? "dialog" : "main"} aria-modal={replay ? "true" : undefined} aria-label="Boarding pass">
@@ -209,7 +184,7 @@ export default function Onboarding({
             <motion.div className="obTicket" layout="position" initial={{ opacity: 0, y: calm ? 0 : 56, rotate: calm ? 0 : -2.5, scale: 0.96 }}
               animate={gone ? { opacity: 0, y: calm ? 0 : -36, scale: 0.97 } : { opacity: 1, y: 0, rotate: 0, scale: 1 }}
               transition={gone ? { duration: 0.5, ease: [0.4, 0, 0.8, 0.3] } : { type: "spring", stiffness: 140, damping: 20, mass: 0.9, layout: { type: "spring", stiffness: 170, damping: 26 } }}>
-              <motion.div className="obRecoil" animate={inked && !calm ? { y: [0, 5, -1.5, 0] } : { y: 0 }} transition={{ duration: 0.45, delay: 0.1, times: [0, 0.25, 0.6, 1] }}>
+              <motion.div className="obRecoil" animate={inked && !calm ? { y: [0, 6, -1.5, 0.5, 0] } : { y: 0 }} transition={{ duration: 0.5, delay: TIMING.contact, times: [0, 0.22, 0.5, 0.75, 1] }}>
                 <div className="obPaper">
                   <div className="obBody" style={tearing ? { clipPath: BODY_TORN, WebkitClipPath: BODY_TORN } : undefined}>
                     <div className="obHead">
@@ -219,15 +194,15 @@ export default function Onboarding({
                     <div className="obRoute" aria-hidden="true"><b>HRM</b><i /><Plane size={18} /><i /><b>{gateCode}</b></div>
 
                     <label className="obLab" htmlFor="obName">Passenger</label>
-                    <input id="obName" className="obName" value={uname} placeholder="your name" maxLength={20}
+                    <input id="obName" ref={nameRef} className={`obName${nudge === "name" ? " nudge" : ""}`} value={uname} placeholder="your name" maxLength={20}
                       readOnly={replay || phase !== PHASE.STAMP || inked} autoCapitalize="none" autoCorrect="off" autoComplete="off" spellCheck={false}
-                      onChange={(e) => setUname(e.target.value)} onKeyDown={(e) => e.key === "Enter" && stamp()} />
-                    {!replay && phase === PHASE.STAMP && !inked && <p className={`obHint${uname && !nameOk ? " bad" : ""}`}>3 to 20 letters, numbers, dots or underscores.</p>}
+                      onChange={(e) => { setUname(e.target.value.toLowerCase().replace(/\s+/g, "")); setNudge(""); }} onKeyDown={(e) => e.key === "Enter" && stamp()} aria-describedby="obHint" />
+                    {!replay && phase === PHASE.STAMP && !inked && <p id="obHint" className={`obHint${uname && !nameOk ? " bad" : ""}`} data-show={uname && !nameOk ? 1 : 0}>3 to 20 letters, numbers, dots or underscores.</p>}
 
                     <div className="obLab" style={{ marginTop: 14 }}>Gate, your class</div>
                     {replay || phase !== PHASE.STAMP || inked
                       ? <div className="obGate">{gate || "Not chosen"}</div>
-                      : <div className="obClass">{classPicker(cls, setCls)}</div>}
+                      : <div ref={classRef} className={`obClass${nudge === "class" ? " nudge" : ""}`}>{classPicker(cls, (c) => { setCls(c); setNudge(""); })}</div>}
 
                     <div className="obRow">
                     <div className="obGrid">
@@ -237,36 +212,13 @@ export default function Onboarding({
                     </div>
 
                     <div className="obZone" aria-hidden="true">
-                      {!inked && <span className="obZoneRing" />}
-                      {inked && <>
-                        <motion.span className="obRipple" initial={{ scale: 0.5, opacity: 0.45 }} animate={{ scale: 2.3, opacity: 0 }} transition={{ duration: 0.9, delay: 0.1, ease: "easeOut" }} />
-                        {!calm && Array.from({ length: 14 }, (_, i) => (
-                          <motion.i key={i} className="obDrop" initial={{ x: 0, y: 0, opacity: 0.9, scale: 1 }}
-                            animate={{ x: Math.cos((i / 14) * 6.283) * (52 + (i * 13) % 34), y: Math.sin((i / 14) * 6.283) * (52 + (i * 13) % 34), opacity: 0, scale: 0.3 }}
-                            transition={{ duration: 0.7, delay: 0.1, ease: [0.1, 0.7, 0.3, 1] }} />
-                        ))}
-                        <motion.div className="obInk" initial={{ scale: calm ? 1 : 1.55, opacity: 0, rotate: -22 }}
-                          animate={{ scale: [calm ? 1 : 1.55, 0.93, 1], opacity: 1, rotate: -11 }} transition={{ duration: 0.34, delay: 0.1, times: [0, 0.6, 1], ease: "easeOut" }}>
-                          <Ink gate={gateCode} date={today} />
-                        </motion.div>
-                      </>}
+                      {!inked && <span className="obZoneRing"><em>Stamp here</em></span>}
+                      {phase === PHASE.STAMP && !calm && <StampShadow pose={stampPose.pose} />}
+                      {inked && <Impression gate={gateCode} date={today} calm={!!calm} tilt={tilt} />}
                     </div>
 
                     {phase === PHASE.STAMP && !calm && (
-                      <motion.button type="button" className="obStamp" disabled={!ready || busy || inked} onClick={stamp}
-                        aria-label={ready ? "Stamp the ticket" : "Stamp the ticket (fill in your name and class first)"}
-                        data-ready={ready ? 1 : 0}
-                        initial={{ y: -90, opacity: 0 }}
-                        animate={inked ? { y: [null, 0, -26, -150], opacity: [1, 1, 1, 0], rotate: [0, 0, -4, 8] }
-                          : { y: ready ? [-38, -46, -38] : -38, opacity: 1 }}
-                        transition={inked ? { duration: 0.95, times: [0, 0.1, 0.26, 1], ease: "easeOut" }
-                          : { duration: 2.4, repeat: ready ? Infinity : 0, ease: "easeInOut" }}
-                        whileTap={ready && !busy ? { y: -12, scale: 0.97, transition: { type: "spring", stiffness: 700, damping: 28 } } : undefined}>
-                        <StampTool disabled={!ready} />
-                      </motion.button>
-                    )}
-                    {phase === PHASE.STAMP && calm && (
-                      <button type="button" className="obStampFlat" disabled={!ready || busy || inked} onClick={stamp}>Stamp the ticket</button>
+                      <StampButton pose={stampPose.pose} pressed={stampPose.pressed} bind={stampPose.bind} ready={ready} busy={busy} inked={inked} onStamp={stamp} />
                     )}
                     </div>
                   </div>
@@ -291,14 +243,24 @@ export default function Onboarding({
             </motion.div>
 
             {err && <p className="obErr" role="alert">{err}</p>}
+            <div className="obAct">
+              {phase === PHASE.STAMP && (
+                <>
+                  <button type="button" className="obGo" data-soft={missing ? 1 : 0} disabled={busy || inked} onClick={stamp} {...(calm ? {} : stampPose.bind)}>
+                    {busy ? "Checking you in…" : inked ? "Checked in" : "Check in"}
+                  </button>
+                  <p className="obNeed" aria-live="polite">{checklist}</p>
+                </>
+              )}
+              {phase === PHASE.TEAR && !torn && <button type="button" className="obGo" onClick={() => finishTear(1)}>Tear off the stub</button>}
+            </div>
             <div className="obFoot">
-              {phase === PHASE.TEAR && !torn && <button type="button" className="obLink" onClick={() => finishTear(1)}>Tap to tear instead</button>}
               {phase === PHASE.STAMP && !inked && (replay
                 ? <button type="button" className="obLink" onClick={onSkip}>Close</button>
                 : <button type="button" className="obLink" onClick={onSignOut}>Sign out</button>)}
               {replay && phase === PHASE.TEAR && !torn && <button type="button" className="obLink" onClick={onSkip}>Close</button>}
             </div>
-          </motion.div>
+            </motion.div>
         )}
       </AnimatePresence>
     </div>

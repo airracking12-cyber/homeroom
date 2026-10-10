@@ -30,3 +30,11 @@ Only the "showing around" part changed; the box, sign-in, boarding pass and plan
 - New helpers step (Plan my evening, Groups, focus timer) and an account step; the old tab-only steps now each unwrap their tab.
 - Credits to Nathaniel Visaya ("Nathan"): first and last tour card, the account menu footer, page metadata, console, README, package author.
 - New: tests/unbox.test.mjs. Not run in a browser (no dependencies could be installed here): after `npm install && npm run dev`, create a fresh account and watch the tour on a phone width and a desktop width, and check that the spotlight lines up with each piece once it has popped.
+
+# v31: sounds and stamp merged in
+The sounds-and-stamp work was built on a different v30 (v29 + sound files + new stamp), while v31 grew from the v30 with the Data tab, the Check in button and the unboxing. They were merged by hand into v31:
+- Taken whole from the sound-and-stamp build: `src/lib/sound.js`, `src/onboarding/Stamp.jsx`, `public/sounds/v2/*`, `public/stamp/v2/*`, `tools/*`, `tests/sound.test.mjs`, `tests/assets.test.mjs`, the two cache rules in `public/_headers`. The in-file synthesizer in `App.jsx` was replaced by the import.
+- Merged, not replaced: `Onboarding.jsx` and `onboarding.css.js`. v31's Check in button, the field nudges, the checklist line and the shorter tear (`TEAR_DISTANCE`, `TEAR_FLICK`) are kept; the stamp, its shadow, the ink, the sound/peel timing and the ticket dip come from the sound-and-stamp build. Dropped as duplicates: its separate plain "Stamp the ticket" button (Check in is the plain button) and v31's old falling stamp icon, ripple and droplets.
+- Changed on top: the stamp is never dead (pressing it too early points at the missing field), is out of the tab order, and holding Check in presses it; the class chips sit above the hovering stamp (`z-index`) so none can be covered by it; the ticket's stamp row is taller (164px) to give the stamp room.
+- Not from either side: `tests/soundstamp.test.mjs` (new).
+

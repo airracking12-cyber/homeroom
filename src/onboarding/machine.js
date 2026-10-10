@@ -51,8 +51,8 @@ export function reduce(phase, event) {
 
 // The stub tear counts as finished when it has gone far enough along the seam, or has been flicked hard enough.
 // `progress` is 0 to 1 along the seam, `velocity` is px/s in the direction of the tear.
-export const TEAR_DISTANCE = 0.55;
-export const TEAR_FLICK = 900;
+export const TEAR_DISTANCE = 0.4;
+export const TEAR_FLICK = 700;
 export function tearCompletes(progress, velocity = 0) {
   if (progress >= TEAR_DISTANCE) return true;
   return progress >= 0.22 && velocity >= TEAR_FLICK;

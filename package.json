@@ -2,14 +2,15 @@
   "name": "homeroom",
   "private": true,
   "author": "Nathaniel Visaya",
-  "version": "0.29.0",
+  "version": "0.31.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
     "build": "vite build",
     "lint": "oxlint",
     "preview": "vite preview",
-    "test": "node --test"
+    "test": "node --test",
+    "verify:sql": "node supabase/verify/behave.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.117.2",
