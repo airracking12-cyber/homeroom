@@ -156,7 +156,7 @@ test("a read that could not reach the database is never treated as an empty list
 });
 
 test("study progress cannot be overwritten by a failed read: the hook checks the outcome and refuses to save before it has loaded", () => {
-  const app = readFileSync(new URL("../src/App.jsx", import.meta.url), "utf8");
+  const app = readFileSync(new URL("../src/lib/study.js", import.meta.url), "utf8");
   const hook = app.slice(app.indexOf("function useStudy("), app.indexOf("const missCard"));
   assert.match(hook, /readOutcome\(v, \{ cards: \{\}, log: \[\], plan: null \}\)/);
   assert.match(hook, /if \(!r\.ok\) \{ setFailed\(true\); return; \}/, "a failed read is a failed state, not an empty one");

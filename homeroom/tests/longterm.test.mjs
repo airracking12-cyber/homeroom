@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import {
   guessGrade, addMonths, targetError, timeLeftLabel, fmtMins, planTitle, curriculumPrompt, parseCurriculum, newPlan, normalizeStore,
   orderItems, weekSlots, weekStartFor, buildSchedule, freezeWeek, toggleDone, setConf, setCap, setTarget, removeTopic, removeSubject,
@@ -280,56 +281,25 @@ test("a new plan starts clean, and item titles read as instructions", () => {
 });
 
 /* ───────────── the stylesheet and the wiring are held to the same rules as the rest of the app ───────────── */
-import { readFileSync } from "node:fs";
-import { LONGTERM_CSS } from "../src/design/longterm.css.js";
 
-const SCALE = [11, 12, 13, 14, 15, 16, 18, 20, 22, 24, 28, 32, 40, 48];
-const tabSrc = readFileSync(new URL("../src/longterm/LongTermTab.jsx", import.meta.url), "utf8");
+const prepSrc = readFileSync(new URL("../src/app/prepare/Prepare.jsx", import.meta.url), "utf8");
+const navSrc = readFileSync(new URL("../src/app/nav.js", import.meta.url), "utf8");
 const appSrc = readFileSync(new URL("../src/App.jsx", import.meta.url), "utf8");
 
-test("long term CSS: type stays on the scale, no caps labels, no transition: all, no blur glass", () => {
-  const sizes = [...LONGTERM_CSS.matchAll(/font-size:\s*([\d.]+)px/g)].map((m) => Number(m[1]));
-  assert.ok(sizes.length > 10);
-  assert.deepEqual([...new Set(sizes.filter((s) => !SCALE.includes(s)))], [], "off-scale font sizes");
-  assert.ok(!/text-transform:\s*uppercase/.test(LONGTERM_CSS));
-  assert.ok(!/transition:\s*all\b/.test(LONGTERM_CSS));
-  assert.ok(!/backdrop-filter/.test(LONGTERM_CSS));
-  assert.ok(!/box-shadow:[^;]*rgba?\(/.test(LONGTERM_CSS), "depth comes from colour blocks, not shadows");
+test("Prepare is wired in: a destination in the nav, rendered by the app, with its shortcut", () => {
+  assert.match(navSrc, /id: "prepare", label: "Prepare"/);
+  assert.match(navSrc, /key: "p"/);
+  assert.match(appSrc, /prepare: <Prepare \/>/);
+  assert.match(appSrc, /import Prepare from/);
 });
 
-test("long term CSS: every animation and transition has a reduced-motion answer", () => {
-  assert.match(LONGTERM_CSS, /prefers-reduced-motion:\s*reduce/);
-  const reduced = LONGTERM_CSS.slice(LONGTERM_CSS.indexOf("prefers-reduced-motion"));
-  assert.match(reduced, /\.lt-bar::after\{animation:none/, "the waiting bar stops moving");
-  const animated = [...LONGTERM_CSS.matchAll(/(\.hr [^{]*)\{[^}]*(?:transition|animation):/g)].map((m) => m[1]);
-  assert.ok(animated.length > 3);
-});
-
-test("long term CSS: text on the dark This week block is light enough (WCAG AA, 4.5:1)", () => {
-  const lum = (hex) => { const c = [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16) / 255).map((v) => (v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4)); return 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2]; };
-  const ratio = (a, b) => { const [x, y] = [lum(a), lum(b)].sort((p, q) => q - p); return (x + 0.05) / (y + 0.05); };
-  for (const bg of ["#181715", "#252320"]) {
-    for (const fg of ["#FAF9F5", "#A09D96", "#E8A58C", "#E8E4D8"]) assert.ok(ratio(fg, bg) >= 4.5, `${fg} on ${bg} is ${ratio(fg, bg).toFixed(2)}:1`);
-    assert.ok(ratio("#8F8C84", bg) >= 3, `the outline of an unpicked "How did it go?" button is visible on ${bg} (3:1)`);
-  }
-  assert.ok(ratio("#181715", "#FAF9F5") >= 4.5, "the picked button's text (dark on light) reads");
-  assert.ok(ratio("#8F8C84", "#181715") >= 3, "the unticked circle is visible (3:1)");
-  assert.ok(ratio("#DB8566", "#181715") >= 3, "the ticked circle is visible (3:1)");
-});
-
-test("the Long term tab is wired in: nav, page, styles, tour and shortcuts", () => {
-  assert.match(appSrc, /\["longterm", "Long term", Telescope\]/);
-  assert.match(appSrc, /tab === "longterm" && \(/);
-  assert.match(appSrc, /FONTS_CSS \+ CSS \+ CALM_CSS \+ LONGTERM_CSS/);
-  assert.match(appSrc, /id: "longterm", target: "tab-longterm"/);
-  assert.match(appSrc, /p: "longterm"/);
-  assert.match(appSrc, /\["g", "p"\], "Go to Long term"/);
-  assert.match(appSrc, /\["tasks", "done", "review", "longterm", "data", "ask"\]\.includes\(pf\.tab\)/);
+test("Prepare keeps the plan's own screens: setup, this week, weeks ahead, fit, coverage, lessons", () => {
+  for (const piece of ["function Setup(", "function ThisWeek(", "function Weeks(", "function LessonBody(", "Make it fit you", "What this covers", "Teach me this", "How did it go?", "Delete this plan"]) assert.ok(prepSrc.includes(piece), piece);
 });
 
 test("long term data is private to the student and never trusts a failed read", () => {
-  assert.match(tabSrc, /`u:\$\{user\}:longterm`/, "stored under the student's own u: key, which the database keeps private");
-  assert.match(tabSrc, /v === undefined\) \{ setStatus\("error"\)/, "an unreachable database is an error, not an empty list");
+  assert.match(prepSrc, /`u:\$\{user\}:longterm`/, "stored under the student's own u: key, which the database keeps private");
+  assert.match(prepSrc, /v === undefined\) \{ setStatus\("error"\)/, "an unreachable database is an error, not an empty list");
 });
 
 test("the assistant is asked for topics only, and the school is treated as data", () => {

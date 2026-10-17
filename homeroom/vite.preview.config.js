@@ -4,5 +4,5 @@ import react from "@vitejs/plugin-react";
 import path from "node:path";
 export default defineConfig({
   plugins: [react()],
-  resolve: { alias: [{ find: /^\.\/supabaseClient(\.js)?$/, replacement: path.resolve("preview/mockSupabase.js") }] },
+  resolve: { alias: [{ find: /^(\.\.?\/)+supabaseClient(\.js)?$/, replacement: path.resolve("preview/mockSupabase.js") }] },
 });

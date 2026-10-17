@@ -1,15 +1,17 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
 import { SUBJ, SUBJ_REG, subjColor, TYPES, REVIEW_TYPES, STATUSES, PRIORITIES, DEFAULT_SUBJECTS, statusLabel, EMAIL_RE } from "../src/lib/constants.js";
 
 test("photo proof is gone: nothing asks for, uploads, shows or stores a task photo", () => {
-  const app = readFileSync(new URL("../src/App.jsx", import.meta.url), "utf8");
+  const dir = (d) => readdirSync(new URL(d, import.meta.url), { recursive: true }).filter((f) => /\.jsx?$/.test(f)).map((f) => readFileSync(new URL(d + f, import.meta.url), "utf8"));
+  const app = [readFileSync(new URL("../src/App.jsx", import.meta.url), "utf8"), ...dir("../src/app/"), ...dir("../src/lib/")].join("\n");
+  const track = readFileSync(new URL("../src/app/track/Track.jsx", import.meta.url), "utf8");
   for (const gone of ["requestStatus", "ProofPanel", "ProofThumbs", "uploadProof", "submitProof", "task-proofs", "proofs", "Show your work", "Ask for a photo", "Photo sent", "compressImage", "sniffFile"]) {
     assert.ok(!app.includes(gone), `"${gone}" is gone from the app`);
   }
   assert.ok(!/MAX_PROOF/.test(readFileSync(new URL("../src/lib/constants.js", import.meta.url), "utf8")));
-  assert.match(app, /onChange=\{\(s\) => setStatus\(detail\.id, s\)\}/, "marking done in the task sheet goes straight through");
+  assert.match(track, /onStatus=\{\(s\) => setStatusKeep\(detail\.id, s\)\}/, "marking done in the task sheet goes straight through");
 });
 
 test("every review type is a real task type, and the lists have no duplicates", () => {

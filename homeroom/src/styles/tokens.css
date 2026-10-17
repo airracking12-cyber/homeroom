@@ -1,0 +1,109 @@
+/* Homeroom design tokens. Every colour, size and radius in the app comes from here: no hex anywhere else.
+   Look: warm cream canvas, serif display at weight 400, hairline borders instead of shadows, one coral accent.
+   Accessibility rules baked in (see DESIGN.md): coral is a fill for large shapes and icons; buttons with text use
+   --accent-fill (white text, 5:1); small text never uses --faint; every text pair is checked by tests/contrast.test.mjs. */
+
+@import "@fontsource-variable/eb-garamond/index.css";
+@import "@fontsource-variable/inter/index.css";
+
+:root {
+  color-scheme: light dark;
+
+  /* ── type ── */
+  --font-display: "EB Garamond Variable", "EB Garamond", "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif;
+  --font-body: "Inter Variable", Inter, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --fs-display: 28px;   /* phones; 40px from 1024px */
+  --fs-h2: 22px;
+  --fs-h3: 18px;
+  --fs-body: 16px;      /* 16px also stops iOS zooming into inputs */
+  --fs-small: 14px;
+  --fs-caption: 13px;
+  --lh-tight: 1.15;
+  --lh-body: 1.55;
+  --track-display: -0.02em;
+
+  /* ── space (4px base) ── */
+  --s-1: 4px; --s-2: 8px; --s-3: 12px; --s-4: 16px; --s-5: 20px; --s-6: 24px; --s-7: 32px; --s-8: 40px; --s-9: 56px;
+  --section: 24px;      /* between sections; 32px from 768px */
+  --pad-card: 16px;     /* 20px from 768px */
+  --gutter: 16px;       /* page side padding; grows with width */
+
+  /* ── radius ── */
+  --r-control: 8px; --r-card: 12px; --r-large: 16px; --r-pill: 999px;
+
+  /* ── motion ── */
+  --dur-1: 120ms; --dur-2: 200ms; --dur-3: 320ms;
+  --ease: cubic-bezier(0.2, 0.7, 0.2, 1);
+
+  /* ── sizes ── */
+  --touch: 44px;        /* minimum tap target */
+  --content-max: 1200px;
+  --nav-h: 64px;        /* phone tab bar, before the safe-area inset */
+  --rail-w: 76px; --side-w: 232px;
+
+  /* ── colour: light ── */
+  --canvas: #faf9f5;
+  --surface: #f3efe5;          /* cards */
+  --surface-2: #ebe5d8;        /* wells, hover wash, inset */
+  --raised: #fffefb;           /* menus and sheets sit a touch above the canvas */
+  --seg-on: #fffefb;           /* the picked option in a segmented control: lighter than its track */
+  --hairline: #e1d9ca;         /* decorative borders (cards, dividers) */
+  --border: #8c877b;           /* borders a person needs to see: inputs, checkboxes (3:1) */
+  --ink: #141413;
+  --body: #3d3d3a;
+  --muted: #5c5a54;
+  --faint: #8e8b82;            /* decoration and disabled only, never small text */
+
+  --coral: #cc785c;            /* big shapes, icons, rings. Not for small text */
+  --accent-fill: #a9583e;      /* buttons with text, selected states */
+  --accent-fill-hover: #8f4730;
+  --accent-fill-press: #7a3c27;
+  --on-accent: #ffffff;
+  --accent-text: #9a4a31;      /* coral-coloured text, readable on canvas and cards */
+  --accent-wash: #f6e4dc;      /* soft coral background */
+  --on-accent-wash: #6e321f;
+  --focus: #8f4730;
+
+  --ok: #2f6a42;     --ok-wash: #e1efe3;
+  --warn: #7d5200;   --warn-wash: #f6ead0;
+  --bad: #a3302a;    --bad-wash: #f8e0dc;
+  --info: #2c5b86;   --info-wash: #dfeaf4;
+
+  --scrim: rgba(20, 20, 19, 0.45);
+  --overlay-shadow: 0 12px 40px rgba(20, 20, 19, 0.16);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) { --dark: 1; }
+}
+
+/* dark values: applied when the system is dark (and not forced light) or when forced dark */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --canvas: #1b1a17; --surface: #252320; --surface-2: #302d28; --raised: #2a2824; --seg-on: #45413a;
+    --hairline: #3a3630; --border: #8b857a;
+    --ink: #f5f1e8; --body: #d9d4c8; --muted: #b0aa9d; --faint: #6f6a60;
+    --coral: #d9856a; --accent-fill: #d9856a; --accent-fill-hover: #e49b83; --accent-fill-press: #c9735a;
+    --on-accent: #1b1a17; --accent-text: #eaa690; --accent-wash: #3b2a23; --on-accent-wash: #f3c9b9; --focus: #f0b49b;
+    --ok: #86c797; --ok-wash: #22332a; --warn: #e0b765; --warn-wash: #372d17; --bad: #f09a92; --bad-wash: #3b2421; --info: #8fbbe6; --info-wash: #1f2e3b;
+    --scrim: rgba(0, 0, 0, 0.6); --overlay-shadow: 0 12px 40px rgba(0, 0, 0, 0.5);
+  }
+}
+:root[data-theme="dark"] {
+  --canvas: #1b1a17; --surface: #252320; --surface-2: #302d28; --raised: #2a2824; --seg-on: #45413a;
+  --hairline: #3a3630; --border: #8b857a;
+  --ink: #f5f1e8; --body: #d9d4c8; --muted: #b0aa9d; --faint: #6f6a60;
+  --coral: #d9856a; --accent-fill: #d9856a; --accent-fill-hover: #e49b83; --accent-fill-press: #c9735a;
+  --on-accent: #1b1a17; --accent-text: #eaa690; --accent-wash: #3b2a23; --on-accent-wash: #f3c9b9; --focus: #f0b49b;
+  --ok: #86c797; --ok-wash: #22332a; --warn: #e0b765; --warn-wash: #372d17; --bad: #f09a92; --bad-wash: #3b2421; --info: #8fbbe6; --info-wash: #1f2e3b;
+  --scrim: rgba(0, 0, 0, 0.6); --overlay-shadow: 0 12px 40px rgba(0, 0, 0, 0.5);
+}
+:root[data-theme="light"] { color-scheme: light; }
+:root[data-theme="dark"] { color-scheme: dark; }
+
+@media (min-width: 768px) {
+  :root { --section: 32px; --pad-card: 20px; --gutter: 24px; }
+}
+@media (min-width: 1024px) {
+  :root { --fs-display: 40px; --fs-h2: 26px; --gutter: 32px; }
+}

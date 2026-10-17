@@ -1,0 +1,104 @@
+/* The shell. Phone: top bar + bottom tab bar. Tablet: a slim rail. Desktop: a sidebar. Content is capped at 1200px. */
+.app { min-height: 100vh; min-height: 100dvh; display: flex; flex-direction: column; padding-bottom: calc(var(--nav-h) + env(safe-area-inset-bottom, 0px)); }
+.main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+
+/* top bar */
+.topbar {
+  position: sticky; top: 0; z-index: 20; display: flex; align-items: center; justify-content: space-between; gap: var(--s-3);
+  min-height: calc(56px + env(safe-area-inset-top, 0px)); padding: env(safe-area-inset-top, 0px) max(var(--gutter), env(safe-area-inset-right, 0px), calc((100% - var(--content-max)) / 2 + var(--gutter))) 0 max(var(--gutter), env(safe-area-inset-left, 0px), calc((100% - var(--content-max)) / 2 + var(--gutter)));
+  background: color-mix(in srgb, var(--canvas) 92%, transparent); -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px); border-bottom: 1px solid var(--hairline);
+}
+@supports not (background: color-mix(in srgb, red, blue)) { .topbar { background: var(--canvas); } }
+.topbar-l { display: flex; align-items: center; gap: var(--s-2); min-width: 0; }
+.topbar-r { display: flex; align-items: center; gap: var(--s-1); flex: none; }
+.topbar-r .btn { white-space: nowrap; }
+.wordmark { white-space: nowrap; flex: none; font-family: var(--font-display); font-size: 24px; letter-spacing: var(--track-display); color: var(--ink); line-height: 1; display: inline-flex; align-items: baseline; gap: 1px; text-decoration: none; }
+.wordmark i { width: 7px; height: 7px; border-radius: 50%; background: var(--coral); display: inline-block; margin-left: 2px; }
+.class-pill { max-width: 40vw; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.search-pill { display: none; }
+
+/* navigation */
+.nav {
+  position: fixed; z-index: 30; left: 0; right: 0; bottom: 0; display: flex; background: var(--canvas); border-top: 1px solid var(--hairline);
+  padding: 0 env(safe-area-inset-right, 0px) env(safe-area-inset-bottom, 0px) env(safe-area-inset-left, 0px); min-height: calc(var(--nav-h) + env(safe-area-inset-bottom, 0px));
+}
+.nav-brand { display: none; }
+.nav-item {
+  flex: 1; min-width: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px; min-height: var(--nav-h); padding: var(--s-2) 2px;
+  font-size: 11px; font-weight: 500; color: var(--muted); text-decoration: none; position: relative; border-radius: var(--r-control);
+  transition: color var(--dur-1) var(--ease), background var(--dur-1) var(--ease);
+}
+.nav-item span { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.nav-item svg { flex: none; }
+.nav-item[aria-current="page"] { color: var(--ink); font-weight: 600; }
+.nav-item[aria-current="page"]::before { content: ""; position: absolute; top: 0; left: 28%; right: 28%; height: 2px; border-radius: 0 0 2px 2px; background: var(--accent-fill); }
+.nav-item:active { background: var(--surface-2); }
+@media (hover: hover) { .nav-item:hover { color: var(--ink); background: var(--surface-2); } }
+.nav-spacer { display: none; }
+
+/* page */
+.page { width: 100%; max-width: var(--content-max); margin-inline: auto; padding: var(--s-6) max(var(--gutter), env(safe-area-inset-right, 0px)) 112px max(var(--gutter), env(safe-area-inset-left, 0px)); flex: 1; }
+@media (min-width: 768px) { .page { padding-bottom: var(--s-9); } }
+.page:focus { outline: none; }
+.page-narrow { max-width: 760px; }
+.page-head { display: flex; align-items: flex-end; justify-content: space-between; gap: var(--s-4); flex-wrap: wrap; margin-bottom: var(--section); }
+.page-head h1 { max-width: 22ch; }
+.page-head .lede { color: var(--muted); margin-top: var(--s-2); max-width: 56ch; }
+.section { margin-top: var(--section); }
+.section-head { display: flex; align-items: baseline; justify-content: space-between; gap: var(--s-3); margin-bottom: var(--s-3); }
+.section-head h2 { font-size: var(--fs-h2); }
+
+/* the one primary action on a phone: a round button above the tab bar */
+.fab { position: fixed; z-index: 25; right: max(var(--gutter), env(safe-area-inset-right, 0px)); bottom: calc(var(--nav-h) + env(safe-area-inset-bottom, 0px) + var(--s-4)); display: inline-flex; align-items: center; gap: var(--s-2); height: 52px; padding: 0 var(--s-5) 0 var(--s-4); border-radius: var(--r-pill); background: var(--accent-fill); color: var(--on-accent); font-weight: 600; box-shadow: var(--overlay-shadow); transition: background var(--dur-1) var(--ease), transform var(--dur-1) var(--ease); }
+.fab:active { background: var(--accent-fill-press); transform: scale(0.97); }
+@media (hover: hover) { .fab:hover { background: var(--accent-fill-hover); } }
+.only-wide { display: none !important; }
+
+/* sync stripe */
+.sync { position: fixed; top: 0; left: 0; right: 0; height: 2px; z-index: 50; background: linear-gradient(90deg, transparent, var(--accent-fill), transparent); background-size: 50% 100%; background-repeat: no-repeat; animation: sync 1.1s var(--ease) infinite; }
+@keyframes sync { from { background-position: -50% 0; } to { background-position: 150% 0; } }
+
+/* ── tablet: a slim rail ── */
+@media (min-width: 768px) {
+  .app { padding-bottom: 0; padding-left: var(--rail-w); }
+  .nav { top: 0; bottom: 0; right: auto; left: 0; width: var(--rail-w); flex-direction: column; align-items: stretch; gap: var(--s-1); padding: var(--s-4) var(--s-2) var(--s-4); border-top: 0; border-right: 1px solid var(--hairline); min-height: 0; }
+  .nav-brand { display: flex; justify-content: center; margin-bottom: var(--s-4); }
+  .nav-brand .wordmark { font-size: 0; } .nav-brand .wordmark::before { content: "H"; font-size: 26px; }
+  .nav-brand .wordmark i { display: none; }
+  .nav-item { flex: none; min-height: 60px; font-size: 12px; }
+  .nav-item[aria-current="page"] { background: var(--surface-2); }
+  .nav-item[aria-current="page"]::before { top: 18%; bottom: 18%; left: -8px; right: auto; width: 3px; height: auto; border-radius: 0 3px 3px 0; }
+  .nav-spacer { display: block; flex: 1; }
+  .topbar .wordmark { display: none; }
+  .fab { display: none; }
+  .only-wide { display: inline-flex !important; }
+  .only-narrow { display: none !important; }
+}
+/* ── desktop: a sidebar ── */
+@media (min-width: 1024px) {
+  .app { padding-left: var(--side-w); }
+  .nav { width: var(--side-w); padding: var(--s-5) var(--s-3); }
+  .nav-brand { justify-content: flex-start; padding: 0 var(--s-3); margin-bottom: var(--s-5); }
+  .nav-brand .wordmark { font-size: 28px; } .nav-brand .wordmark::before { content: none; }
+  .nav-brand .wordmark i { display: inline-block; }
+  .nav-item { flex-direction: row; justify-content: flex-start; gap: var(--s-3); min-height: 44px; padding: 0 var(--s-3); font-size: var(--fs-small); }
+  .nav-item[aria-current="page"]::before { top: 22%; bottom: 22%; left: -12px; }
+  .search-pill { display: inline-flex; align-items: center; gap: var(--s-2); min-width: 260px; min-height: 40px; padding: 0 var(--s-3); border: 1px solid var(--border); border-radius: var(--r-control); color: var(--muted); font-size: var(--fs-small); background: var(--canvas); }
+  .search-pill kbd { margin-left: auto; }
+  @media (hover: hover) { .search-pill:hover { background: var(--surface-2); } }
+  .search-icon { display: none; }
+}
+/* very wide screens keep the content readable, not stretched */
+@media (min-width: 1600px) { .page { padding-inline: var(--s-8); } }
+/* a phone held sideways is short: keep the bar slim and let content have the room */
+@media (max-height: 480px) and (orientation: landscape) and (max-width: 767px) {
+  :root { --nav-h: 48px; } .nav-item { flex-direction: row; justify-content: center; gap: var(--s-2); min-height: var(--nav-h); font-size: 12px; } .topbar { min-height: calc(48px + env(safe-area-inset-top, 0px)); }
+}
+
+/* very small phones: the class name moves into the page's date line, and the Add button becomes a round icon */
+@media (max-width: 399px) {
+  .class-pill { display: none; }
+  .fab { width: 56px; padding: 0; justify-content: center; }
+  .fab .fab-label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
+}
+@media (min-width: 400px) { .only-xs { display: none; } }

@@ -3,7 +3,10 @@
 export async function onRequestPost({ request, env, params }) {
   const url = new URL(request.url);
   const origin = request.headers.get("Origin");
-  if (origin && new URL(origin).host !== url.host) return new Response("Forbidden", { status: 403 });
+  // Origin can be the literal string "null" (sandboxed iframes, some redirects); new URL() throws on it, so treat it as foreign.
+  let originHost = null;
+  try { originHost = origin ? new URL(origin).host : null; } catch { originHost = ""; }
+  if (origin && originHost !== url.host) return new Response("Forbidden", { status: 403 });
   // Only signed-in students can use the assistant (checked with Supabase).
   if (!env.SUPABASE_URL || !env.SUPABASE_ANON_KEY) return new Response("Server not set up", { status: 503 });
   const token = (request.headers.get("Authorization") || "").replace(/^Bearer /, "");

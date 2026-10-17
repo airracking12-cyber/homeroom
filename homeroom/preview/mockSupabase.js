@@ -1,5 +1,5 @@
 // A stand-in for the Supabase client, for local previews and screenshots only (see vite.preview.config.js). Nothing here ships.
-// Scenario comes from ?scn= : new (signed in, no ticket yet), pending (stamped, never finished the tour), returning (all done).
+// Scenario comes from ?scn= : new (signed in, no profile yet), pending (started the intro, never finished it), returning (all done), out (signed out).
 const q = new URLSearchParams(location.search);
 const scn = q.get("scn") || "returning";
 const today = new Date();
@@ -104,7 +104,7 @@ export const supabase = {
     return { data: null, error: null };
   },
   auth: {
-    getSession: async () => ({ data: { session: { access_token: "t", user: { id: "u1", user_metadata: meta } } } }),
+    getSession: async () => ({ data: { session: scn === "out" ? null : { access_token: "t", user: { id: "u1", user_metadata: meta } } } }),
     updateUser: async ({ data }) => { Object.assign(meta, data); sessionStorage.setItem("mock:meta", JSON.stringify(meta)); window.__mockMeta = { ...meta }; return { data: {}, error: null }; },
     onAuthStateChange: (cb) => { listeners.add(cb); return { data: { subscription: { unsubscribe: () => listeners.delete(cb) } } }; },
     signOut: async () => ({ error: null }), signUp: async () => ({ data: {}, error: null }), signInWithPassword: async () => ({ data: {}, error: null }), resetPasswordForEmail: async () => ({ error: null }),

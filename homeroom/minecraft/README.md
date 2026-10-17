@@ -29,7 +29,7 @@ Student tries to join        ->  the server asks Homeroom "is <name> allowed in?
 1. **Database.** Open `supabase-minecraft.sql`, change `CHANGE-ME-to-a-long-random-text` to your own long random text (this is the shared secret), then paste the whole file into Supabase > SQL Editor > Run. Do this *after* `supabase/schema.sql`.
 2. **Plugin.** You need **JDK 25** (Paper 26.1.x requires Java 25). In the `plugin/` folder run `./gradlew build` (or `gradle build` if you have Gradle installed). The jar appears in `plugin/build/libs/HomeroomGate-1.0.0.jar`. Drop it in the server's `plugins/` folder and start the server once.
 3. **Plugin config.** Edit `plugins/HomeroomGate/config.yml`: your Supabase URL, the anon key (the same public one the website uses), and the same secret as in step 1. Then run `/homeroomgate reload`.
-4. **App.** In `src/minecraft.config.js` change `on: false` to `on: true` and redeploy the site.
+4. **App.** Add the build variable `VITE_MC_ON` with the value `true` (next to `VITE_MC_IPV6` and `VITE_MC_HOST`) and redeploy the site. While it is not `true`, the Minecraft screens are left out of the build entirely.
 
 Test it: `/homeroomgate check SomeName` in the server console tells you what the server would answer for that name (`allowed`, `not_linked`, `tasks_pending`).
 

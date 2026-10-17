@@ -15,13 +15,12 @@ export const SOUND_BASE = "/sounds/v2/"; // change together with VERSION in tool
 // what each sound name can play (more than one file = variants)
 export const BANK = {
   tap: ["tap1", "tap2", "tap3"], pop: ["pop1", "pop2", "pop3"], rip: ["rip1", "rip2", "rip3"],
-  add: ["add"], done: ["done"], undo: ["undo"], send: ["send"], err: ["err"], bell: ["bell"], whoosh: ["whoosh"],
-  stamp: ["stamp"], lift: ["lift"], boxOpen: ["boxOpen"], schoolbell: ["schoolbell"],
+  add: ["add"], done: ["done"], undo: ["undo"], send: ["send"], err: ["err"], bell: ["bell"], schoolbell: ["schoolbell"],
 };
 // how much random pitch drift each sound gets (0.03 = up to 3% either way)
-const DRIFT = { tap: 0.03, pop: 0.025, rip: 0.05, stamp: 0.015, lift: 0.03, err: 0.01 };
+const DRIFT = { tap: 0.03, pop: 0.025, rip: 0.05, err: 0.01 };
 // quick level trims on top of the levels baked into the files (1 = as rendered)
-export const TRIM = { tap: 1, pop: 1, add: 1, done: 1, undo: 1, send: 1, err: 1, bell: 1, rip: 1, whoosh: 1, stamp: 1, lift: 1, boxOpen: 1, schoolbell: 1 };
+export const TRIM = { tap: 1, pop: 1, add: 1, done: 1, undo: 1, send: 1, err: 1, bell: 1, rip: 1, schoolbell: 1 };
 
 export function createSound(env = {}) {
   const win = env.window || (typeof window !== "undefined" ? window : null);
@@ -135,12 +134,6 @@ export function createSound(env = {}) {
     src.connect(h); h.connect(l); l.connect(g); g.connect(sfxBus);
     src.start(t, random() * 0.5); src.stop(t + dur + 0.02);
   };
-  const thud = (t, f, v) => {
-    const o = ctx.createOscillator(), g = ctx.createGain();
-    o.frequency.setValueAtTime(f, t); o.frequency.exponentialRampToValueAtTime(f * 0.35, t + 0.14);
-    g.gain.setValueAtTime(v, t); g.gain.exponentialRampToValueAtTime(0.0001, t + 0.2);
-    o.connect(g); g.connect(sfxBus); o.start(t); o.stop(t + 0.24);
-  };
   const SYNTH = {
     tap: (t) => tone(760, t, 0.05, { type: "triangle", vol: 0.035 }),
     done: (t) => { tone(523.25, t, 0.28, { vol: 0.09 }); tone(659.25, t + 0.08, 0.28, { vol: 0.09 }); tone(783.99, t + 0.16, 0.45, { vol: 0.1 }); },
@@ -151,13 +144,6 @@ export function createSound(env = {}) {
     err: (t) => { tone(233, t, 0.16, { type: "triangle", vol: 0.08 }); tone(185, t + 0.12, 0.25, { type: "triangle", vol: 0.08 }); },
     bell: (t) => { tone(1318.5, t, 1.1, { vol: 0.08 }); tone(1975.5, t, 0.7, { vol: 0.03 }); tone(2637, t, 0.4, { vol: 0.015 }); },
     rip: (t) => grain(t, 0.09, 0.11, 1800 + random() * 1200, 7500),
-    whoosh: (t) => grain(t, 0.26, 0.04, 500, 3200),
-    stamp: (t) => { thud(t, 150, 0.22); grain(t, 0.06, 0.07, 900, 4000); },
-    lift: (t) => grain(t, 0.07, 0.04, 1500, 4500),
-    boxOpen: (t) => {
-      grain(t, 0.4, 0.09, 300, 5000); thud(t + 0.06, 110, 0.2);
-      tone(659.25, t + 0.28, 0.4, { vol: 0.07 }); tone(987.77, t + 0.36, 0.55, { vol: 0.07 }); tone(1318.5, t + 0.46, 0.8, { vol: 0.05 });
-    },
     schoolbell: (t) => { [0, 0.2, 0.4, 0.6, 0.8, 1.0].forEach((d) => { tone(1568, t + d, 0.5, { vol: 0.07 }); tone(2349, t + d, 0.3, { vol: 0.025 }); }); },
   };
   // the original generative lo-fi, only used when the music file can't be loaded

@@ -108,3 +108,21 @@ test("Groq never gets tools, even if search is asked for", async () => {
   const { sent } = await forwarded({ provider: "groq", query: "&search=1", body: { messages: [], tools: [{ type: "function" }] } });
   assert.equal(sent.tools, undefined);
 });
+
+test("an Origin that is not a URL (\"null\") is refused with 403, and nothing is called", async () => {
+  const { env, request } = setup();
+  const calls = []; const f = globalThis.fetch; globalThis.fetch = async (...a) => { calls.push(String(a[0])); return f(...a); };
+  for (const origin of ["null", "not a url"]) {
+    const req = new Request(request.url, { method: "POST", headers: { Authorization: "Bearer t", Origin: origin }, body: "{}" });
+    const res = await onRequestPost({ request: req, env, params: { provider: "gemini" } });
+    assert.equal(res.status, 403, origin);
+  }
+  assert.deepEqual(calls, []);
+});
+
+test("another site's Origin is refused, and the same site's Origin gets through", async () => {
+  const { env, request } = setup();
+  const mk = (origin) => new Request(request.url, { method: "POST", headers: { Authorization: "Bearer t", Origin: origin }, body: JSON.stringify({ contents: [] }) });
+  assert.equal((await onRequestPost({ request: mk("https://evil.test"), env, params: { provider: "gemini" } })).status, 403);
+  assert.equal((await onRequestPost({ request: mk("https://app.test"), env, params: { provider: "gemini" } })).status, 200);
+});
