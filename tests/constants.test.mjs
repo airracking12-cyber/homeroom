@@ -1,22 +1,23 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { SUBJ, SUBJ_REG, subjColor, TYPES, REVIEW_TYPES, STATUSES, PRIORITIES, DEFAULT_SUBJECTS, needsProofType, wantsProof, statusLabel, EMAIL_RE, MAX_PROOF } from "../src/lib/constants.js";
+import { readFileSync, readdirSync } from "node:fs";
+import { SUBJ, SUBJ_REG, subjColor, TYPES, REVIEW_TYPES, STATUSES, PRIORITIES, DEFAULT_SUBJECTS, statusLabel, EMAIL_RE } from "../src/lib/constants.js";
 
-test("quizzes, study sessions and exams never ask for a photo; other tasks do unless switched off", () => {
-  for (const type of REVIEW_TYPES) {
-    assert.equal(needsProofType({ type }), false, type);
-    assert.equal(wantsProof({ type }), false, type);
+test("photo proof is gone: nothing asks for, uploads, shows or stores a task photo", () => {
+  const dir = (d) => readdirSync(new URL(d, import.meta.url), { recursive: true }).filter((f) => /\.jsx?$/.test(f)).map((f) => readFileSync(new URL(d + f, import.meta.url), "utf8"));
+  const app = [readFileSync(new URL("../src/App.jsx", import.meta.url), "utf8"), ...dir("../src/app/"), ...dir("../src/lib/")].join("\n");
+  const track = readFileSync(new URL("../src/app/track/Track.jsx", import.meta.url), "utf8");
+  for (const gone of ["requestStatus", "ProofPanel", "ProofThumbs", "uploadProof", "submitProof", "task-proofs", "proofs", "Show your work", "Ask for a photo", "Photo sent", "compressImage", "sniffFile"]) {
+    assert.ok(!app.includes(gone), `"${gone}" is gone from the app`);
   }
-  assert.equal(wantsProof({ type: "Homework" }), true);
-  assert.equal(wantsProof({ type: "Homework", proof: false }), false);
-  assert.equal(wantsProof({ type: "Project", proof: true }), true);
+  assert.ok(!/MAX_PROOF/.test(readFileSync(new URL("../src/lib/constants.js", import.meta.url), "utf8")));
+  assert.match(track, /onStatus=\{\(s\) => setStatusKeep\(detail\.id, s\)\}/, "marking done in the task sheet goes straight through");
 });
 
 test("every review type is a real task type, and the lists have no duplicates", () => {
   for (const t of REVIEW_TYPES) assert.ok(TYPES.includes(t), `${t} missing from TYPES`);
   for (const list of [TYPES, PRIORITIES, DEFAULT_SUBJECTS]) assert.equal(new Set(list).size, list.length);
   assert.deepEqual(DEFAULT_SUBJECTS, Object.keys(SUBJ));
-  assert.ok(MAX_PROOF >= 1);
 });
 
 test("statusLabel reads well and tolerates missing values", () => {

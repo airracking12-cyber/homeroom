@@ -115,3 +115,54 @@ test("parseJSON copes with code fences, chatter around the JSON, and garbage", (
   assert.equal(parseJSON("{broken"), null);
   assert.equal(parseJSON(undefined), null);
 });
+
+/* ───────────── web search with a fallback ───────────── */
+import { geminiSources, callSearch, geminiSearchCall } from "../src/lib/ai.js";
+
+const grounded = (text, chunks) => new Response(JSON.stringify({ candidates: [{ content: { parts: [{ text }] }, groundingMetadata: { groundingChunks: chunks } }] }), { status: 200 });
+const web = (title, uri) => ({ web: { title, uri } });
+
+test("sources are only real https pages Google read: one per site, five at most, tidy titles", () => {
+  const data = { candidates: [{ groundingMetadata: { groundingChunks: [
+    web("  pshs.edu.ph  ", "https://vertexaisearch.example/a"), web("PSHS.edu.ph", "https://vertexaisearch.example/dup"),
+    web("old-site.com", "http://insecure.example"), web("evil", "javascript:alert(1)"), web("", "https://x.example"),
+    web("a.com", "https://a"), web("b.com", "https://b"), web("c.com", "https://c"), web("d.com", "https://d"), web("e.com", "https://e"), null, {},
+  ] } }] };
+  const s = geminiSources(data);
+  assert.deepEqual(s.map((x) => x.title), ["pshs.edu.ph", "a.com", "b.com", "c.com", "d.com"]);
+  assert.ok(s.every((x) => x.uri.startsWith("https://")));
+  assert.deepEqual(geminiSources({}), []);
+  assert.equal(geminiSources({ candidates: [{ groundingMetadata: { groundingChunks: [web("x".repeat(200), "https://x")] } }] })[0].title.length, 60);
+});
+
+test("a searched answer returns the text and its sources, asking for search on the way", async (t) => {
+  t.mock.method(console, "warn", () => {});
+  const urls = [];
+  globalThis.fetch = async (url) => { urls.push(String(url)); return grounded("answer", [web("pshs.edu.ph", "https://g/1")]); };
+  const r = await callSearch("sys", ask);
+  assert.deepEqual([r.text, r.searched, r.sources.length], ["answer", true, 1]);
+  assert.match(urls[0], /\/api\/gemini\?mode=generate&search=1/);
+  assert.equal(urls.length, 1);
+});
+
+test("if search finds nothing the answer is still used, but it does not count as searched", async () => {
+  globalThis.fetch = async () => grounded("answer from memory", []);
+  const r = await callSearch("sys", ask);
+  assert.deepEqual([r.text, r.searched, r.sources], ["answer from memory", false, []]);
+});
+
+test("if search fails (off, over quota, down) the ordinary answer is used instead", async (t) => {
+  t.mock.method(console, "warn", () => {});
+  const urls = [];
+  globalThis.fetch = async (url) => { urls.push(String(url)); return String(url).includes("search=1") ? new Response("no", { status: 400 }) : geminiOk("plain answer"); };
+  const r = await callSearch("sys", ask);
+  assert.deepEqual([r.text, r.searched, r.sources], ["plain answer", false, []]);
+  assert.equal(urls.length, 2);
+  assert.ok(!urls[1].includes("search=1"), "the fallback does not ask for search again");
+});
+
+test("our own rate limit is passed on, not hidden by the fallback", async () => {
+  globalThis.fetch = async () => ours429();
+  await assert.rejects(() => callSearch("sys", ask), (e) => e.limited === true);
+  await assert.rejects(() => geminiSearchCall("sys", ask), (e) => e.limited === true);
+});

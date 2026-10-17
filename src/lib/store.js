@@ -6,6 +6,14 @@
 
 export const LS = "hr:";
 
+// What a read of a private row means before it is used. undefined means the database could not be reached, which is NOT the
+// same as "nothing saved yet" (null). Treating it as empty is how a bad connection can wipe real progress: the next save
+// would write the empty copy over the real one. So an unreachable read is reported as not ok, and the caller must not save.
+export function readOutcome(v, empty = {}) {
+  if (v === undefined) return { ok: false };
+  return { ok: true, value: { ...empty, ...(v && typeof v === "object" ? v : {}) } };
+}
+
 export function createStore(supabase, storage = globalThis.localStorage) {
   return {
     async get(key, shared = false) {

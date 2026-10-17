@@ -3,7 +3,10 @@
 export async function onRequestPost({ request, env, params }) {
   const url = new URL(request.url);
   const origin = request.headers.get("Origin");
-  if (origin && new URL(origin).host !== url.host) return new Response("Forbidden", { status: 403 });
+  // Origin can be the literal string "null" (sandboxed iframes, some redirects); new URL() throws on it, so treat it as foreign.
+  let originHost = null;
+  try { originHost = origin ? new URL(origin).host : null; } catch { originHost = ""; }
+  if (origin && originHost !== url.host) return new Response("Forbidden", { status: 403 });
   // Only signed-in students can use the assistant (checked with Supabase).
   if (!env.SUPABASE_URL || !env.SUPABASE_ANON_KEY) return new Response("Server not set up", { status: 503 });
   const token = (request.headers.get("Authorization") || "").replace(/^Bearer /, "");
@@ -26,6 +29,9 @@ export async function onRequestPost({ request, env, params }) {
   if (Number(request.headers.get("Content-Length")) > MAX_BODY) return new Response("Too large", { status: 413 });
   let body = await request.arrayBuffer();
   if (body.byteLength > MAX_BODY) return new Response("Too large", { status: 413 });
+  // Web search is switched on here, never by the browser: a request can ask for it with ?search=1, but only for Gemini, only
+  // when it has not been turned off (AI_SEARCH=off in Cloudflare), and the tool itself is always the one set below.
+  const search = params.provider === "gemini" && url.searchParams.get("search") === "1" && String(env.AI_SEARCH || "").toLowerCase() !== "off";
   // Only the app's own settings are allowed through: the model is chosen here, and output length is capped.
   try {
     const j = JSON.parse(new TextDecoder().decode(body));
@@ -36,6 +42,7 @@ export async function onRequestPost({ request, env, params }) {
     } else if (params.provider === "gemini") {
       j.generationConfig = { ...(j.generationConfig || {}), maxOutputTokens: Math.min(Number(j.generationConfig?.maxOutputTokens) || 4096, 4096) };
       delete j.tools;
+      if (search) j.tools = [{ google_search: {} }];
     }
     body = new TextEncoder().encode(JSON.stringify(j));
   } catch { return new Response("Bad request", { status: 400 }); }

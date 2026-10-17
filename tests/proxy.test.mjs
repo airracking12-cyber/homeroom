@@ -64,3 +64,65 @@ test("signed-out requests are refused before the limiter is ever consulted", asy
   assert.equal(res.status, 401);
   assert.equal(consulted, false);
 });
+
+/* ───────────── web search: switched on by the server, never by the browser ───────────── */
+
+// Records what the proxy actually forwards to the model.
+async function forwarded({ provider = "gemini", query = "", env = {}, body = { contents: [] } } = {}) {
+  let sent = null;
+  globalThis.fetch = async (url, init) => {
+    if (String(url).includes("/auth/v1/user")) return new Response(JSON.stringify({ id: "user-1" }), { status: 200 });
+    sent = JSON.parse(new TextDecoder().decode(init.body));
+    return new Response(JSON.stringify({ candidates: [{ content: { parts: [{ text: "ok" }] } }] }), { status: 200 });
+  };
+  const request = new Request(`https://app.test/api/${provider}?mode=generate${query}`, {
+    method: "POST", headers: { Authorization: "Bearer t", "Content-Type": "application/json" }, body: JSON.stringify(body),
+  });
+  const e = { SUPABASE_URL: "https://x.supabase.co", SUPABASE_ANON_KEY: "k", GEMINI_API_KEY: "g", GROQ_API_KEY: "q", ...env };
+  const res = await onRequestPost({ request, env: e, params: { provider } });
+  return { res, sent };
+}
+
+test("?search=1 gives Gemini the Google Search tool, and nothing else", async () => {
+  const { res, sent } = await forwarded({ query: "&search=1" });
+  assert.equal(res.status, 200);
+  assert.deepEqual(sent.tools, [{ google_search: {} }]);
+});
+
+test("without ?search=1 there are no tools, and a browser can never choose its own", async () => {
+  const none = await forwarded({ body: { contents: [], tools: [{ code_execution: {} }, { google_search: {} }] } });
+  assert.equal(none.sent.tools, undefined, "tools sent by the browser are removed");
+  const swapped = await forwarded({ query: "&search=1", body: { contents: [], tools: [{ code_execution: {} }, { url_context: {} }] } });
+  assert.deepEqual(swapped.sent.tools, [{ google_search: {} }], "even with search on, only the server's tool is used");
+});
+
+test("search can be switched off for everyone with AI_SEARCH=off, and the request still works", async () => {
+  const { res, sent } = await forwarded({ query: "&search=1", env: { AI_SEARCH: "off" } });
+  assert.equal(res.status, 200);
+  assert.equal(sent.tools, undefined);
+  assert.deepEqual((await forwarded({ query: "&search=1", env: { AI_SEARCH: "OFF" } })).sent.tools, undefined, "case does not matter");
+  assert.deepEqual((await forwarded({ query: "&search=1", env: { AI_SEARCH: "on" } })).sent.tools, [{ google_search: {} }]);
+});
+
+test("Groq never gets tools, even if search is asked for", async () => {
+  const { sent } = await forwarded({ provider: "groq", query: "&search=1", body: { messages: [], tools: [{ type: "function" }] } });
+  assert.equal(sent.tools, undefined);
+});
+
+test("an Origin that is not a URL (\"null\") is refused with 403, and nothing is called", async () => {
+  const { env, request } = setup();
+  const calls = []; const f = globalThis.fetch; globalThis.fetch = async (...a) => { calls.push(String(a[0])); return f(...a); };
+  for (const origin of ["null", "not a url"]) {
+    const req = new Request(request.url, { method: "POST", headers: { Authorization: "Bearer t", Origin: origin }, body: "{}" });
+    const res = await onRequestPost({ request: req, env, params: { provider: "gemini" } });
+    assert.equal(res.status, 403, origin);
+  }
+  assert.deepEqual(calls, []);
+});
+
+test("another site's Origin is refused, and the same site's Origin gets through", async () => {
+  const { env, request } = setup();
+  const mk = (origin) => new Request(request.url, { method: "POST", headers: { Authorization: "Bearer t", Origin: origin }, body: JSON.stringify({ contents: [] }) });
+  assert.equal((await onRequestPost({ request: mk("https://evil.test"), env, params: { provider: "gemini" } })).status, 403);
+  assert.equal((await onRequestPost({ request: mk("https://app.test"), env, params: { provider: "gemini" } })).status, 200);
+});

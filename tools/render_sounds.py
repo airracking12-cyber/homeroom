@@ -28,8 +28,7 @@ TAU = 2 * np.pi
 # peak level of each file in dB below full scale. Frequent sounds are quiet, rare "moments" are louder.
 LEVELS = {
     "tap1": -17, "tap2": -17, "tap3": -17, "pop1": -15, "pop2": -15, "pop3": -15, "add": -12, "done": -10, "undo": -15,
-    "send": -14, "err": -13, "bell": -11, "rip1": -12, "rip2": -12, "rip3": -12, "whoosh": -15, "stamp": -6, "lift": -15,
-    "boxOpen": -10, "schoolbell": -11,
+    "send": -14, "err": -13, "bell": -11, "rip1": -12, "rip2": -12, "rip3": -12, "schoolbell": -11,
 }
 
 # ───────────────────────── building blocks ─────────────────────────
@@ -245,64 +244,6 @@ def s_rip(seed):
     out *= env[:, None]
     return verb(out, wet=0.12, rt60=0.4)
 
-def s_whoosh():
-    r = np.random.default_rng(81)
-    dur = 0.62
-    n = int(dur * SR)
-    t = np.arange(n) / SR
-    noise = r.normal(0, 1, n)
-    out = np.zeros(n)
-    block, hop = 2048, 1024
-    win = np.hanning(block)
-    for s in range(0, n - block, hop):
-        p = (s + block / 2) / n
-        fc = 380 + 2100 * np.sin(np.pi * p) ** 1.3
-        seg = bandpass(noise[s:s + block], fc * 0.6, fc * 1.5, 2) * win
-        out[s:s + block] += seg
-    out *= np.sin(np.pi * t / dur) ** 2
-    pans = np.sin(np.pi * t / dur) * 0 + (t / dur * 1.2 - 0.6)       # glides from left to right
-    a = (pans + 1) * np.pi / 4
-    return verb(np.stack([out * np.cos(a), out * np.sin(a)], axis=1), wet=0.2, rt60=0.7)
-
-def s_stamp():
-    r = np.random.default_rng(91)
-    t = tarr(0.5)
-    # the body of the thump: a low tone that drops in pitch as the rubber compresses
-    f = 52 + 48 * np.exp(-t / 0.035)
-    body = np.sin(TAU * np.cumsum(f) / SR) * np.exp(-t / 0.085)
-    # the wooden handle and block knocking on the desk
-    knock = strike(300.0, 0.3, "wood", rng=r, attack=0.001, ringscale=1.6, click=1.0) * 0.8
-    # the flat slap of paper under the rubber
-    slap = bandpass(r.normal(0, 1, len(t)), 900, 3600, 2) * np.exp(-t / 0.012) * 0.55
-    # and the soft "shh" of ink squeezing out
-    ink = bandpass(r.normal(0, 1, len(t)), 2500, 6500, 2) * np.minimum(1, t / 0.01) * np.exp(-t / 0.05) * 0.1
-    y = msum(body, knock * 0.7, slap, ink)
-    return verb(pan(lowpass(y, 8000), 0.0), wet=0.16, rt60=0.35)
-
-def s_lift():
-    r = np.random.default_rng(101)
-    n = int(0.16 * SR)
-    t = np.arange(n) / SR
-    peel = bandpass(r.normal(0, 1, n), 1100, 4200, 2) * (t / 0.16) ** 1.4 * np.exp(-((t - 0.15) / 0.02) ** 2 * 0.0)
-    peel *= 1 - np.exp(-(0.16 - t) / 0.006)
-    pop = strike(210.0, 0.12, "felt", rng=r, attack=0.002) * 0.7
-    buf = np.zeros((n, 2)) + pan(peel * 0.5, 0.1)
-    buf = mix_into(buf, pan(pop, 0.0), 0.15)
-    return verb(buf, wet=0.12, rt60=0.4)
-
-def s_boxopen():
-    r = np.random.default_rng(111)
-    n = int(0.42 * SR)
-    t = np.arange(n) / SR
-    flap = bandpass(r.normal(0, 1, n), 380, 3200, 2) * (np.abs(lowpass(r.normal(0, 1, n), 90)) ** 1.2) * np.sin(np.pi * np.minimum(1, t / 0.42)) ** 0.8
-    flap /= np.max(np.abs(flap)) + 1e-9
-    buf = pan(flap * 0.55, -0.1)
-    thump = tail(np.sin(TAU * np.cumsum(70 + 50 * np.exp(-tarr(0.25) / 0.04)) / SR) * np.exp(-tarr(0.25) / 0.07), 40)
-    buf = mix_into(buf, pan(thump * 0.8, 0.0), 0.07)
-    for f, at, v, p in [(659.25, 0.26, 0.85, -0.2), (987.77, 0.35, 0.9, 0.0), (1318.5, 0.45, 1.0, 0.2), (1975.5, 0.56, 0.5, 0.1)]:
-        buf = mix_into(buf, pan(strike(f, 1.6, "celesta", vel=v, rng=r, ringscale=1.5), p), at)
-    return verb(buf, wet=0.34, rt60=1.3)
-
 def s_schoolbell():
     r = np.random.default_rng(121)
     buf = np.zeros((1, 2))
@@ -443,8 +384,7 @@ def main():
         "tap1": s_tap(1000, 1), "tap2": s_tap(940, 2), "tap3": s_tap(1070, 3),
         "pop1": s_pop(1318.5, 4), "pop2": s_pop(1174.7, 5), "pop3": s_pop(1568.0, 6),
         "add": s_add(), "done": s_done(), "undo": s_undo(), "send": s_send(), "err": s_err(), "bell": s_bell(),
-        "rip1": s_rip(7), "rip2": s_rip(8), "rip3": s_rip(9), "whoosh": s_whoosh(), "stamp": s_stamp(), "lift": s_lift(),
-        "boxOpen": s_boxopen(), "schoolbell": s_schoolbell(),
+        "rip1": s_rip(7), "rip2": s_rip(8), "rip3": s_rip(9), "schoolbell": s_schoolbell(),
     }
     stats = []
     for name, x in sounds.items():

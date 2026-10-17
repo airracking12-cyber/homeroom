@@ -11,7 +11,7 @@ export const GROQ_MODEL = "openai/gpt-oss-120b";
 
 // Nothing may hang forever: a request that gets no answer is given up on, and the backup provider (or an error message)
 // takes over. Reading a PDF or photo is slower, so it gets longer. A stream that goes quiet is also given up on.
-export const limits = { call: 60000, media: 120000, idle: 30000 };
+export const limits = { call: 60000, media: 120000, search: 90000, idle: 30000 };
 const callMs = (messages) => (hasMedia(messages) ? limits.media : limits.call);
 async function fetchT(url, init, ms) {
   const ctl = new AbortController();
@@ -52,6 +52,23 @@ export const slowDown = () => Object.assign(new Error("You're going quickly. Giv
 
 export const geminiText = (data) => (data?.candidates?.[0]?.content?.parts || []).map((x) => x.text || "").join("");
 
+// The pages Google found and used for a searched answer. These come from Google's own record of what it read, never from text the
+// model wrote, so a link can't be made up. Only https links, at most five, one per site.
+export function geminiSources(data) {
+  const chunks = data?.candidates?.[0]?.groundingMetadata?.groundingChunks || [];
+  const seen = new Set();
+  const out = [];
+  for (const c of chunks) {
+    const uri = String(c?.web?.uri || "");
+    const title = String(c?.web?.title || "").replace(/\s+/g, " ").trim().slice(0, 60);
+    if (!/^https:\/\//i.test(uri) || !title || seen.has(title.toLowerCase())) continue;
+    seen.add(title.toLowerCase());
+    out.push({ title, uri });
+    if (out.length >= 5) break;
+  }
+  return out;
+}
+
 export async function geminiCall(system, messages) {
   const res = await fetchT(`${GEMINI}?mode=generate`, {
     method: "POST", headers: await getHeaders(),
@@ -62,6 +79,20 @@ export async function geminiCall(system, messages) {
   const text = geminiText(await res.json());
   if (!text) throw new Error("Gemini empty");
   return text;
+}
+
+// Like geminiCall, but lets Gemini search the web first. Returns { text, sources }.
+export async function geminiSearchCall(system, messages) {
+  const res = await fetchT(`${GEMINI}?mode=generate&search=1`, {
+    method: "POST", headers: await getHeaders(),
+    body: JSON.stringify(toGemini(system, messages)),
+  }, limits.search);
+  if (ownLimit(res)) throw slowDown();
+  if (!res.ok) throw new Error(`Gemini search ${res.status}`);
+  const data = await res.json();
+  const text = geminiText(data);
+  if (!text) throw new Error("Gemini search empty");
+  return { text, sources: geminiSources(data) };
 }
 
 export async function groqCall(system, messages) {
@@ -110,6 +141,19 @@ export async function callClaude(system, messages) {
   { try { return await geminiCall(system, messages); } catch (e) { if (e.limited) throw e; console.warn("Gemini failed, trying Groq", e); } }
   if (!hasMedia(messages)) { try { return await groqCall(system, messages); } catch (e) { if (e.limited) throw e; console.warn("Groq failed", e); } }
   throw busy();
+}
+
+// Asks with a web search first. If search isn't available (switched off, over its quota, or failing) the ordinary answer is used
+// instead, with no sources, so the feature still works. Returns { text, sources, searched }.
+export async function callSearch(system, messages) {
+  try {
+    const r = await geminiSearchCall(system, messages);
+    return { ...r, searched: r.sources.length > 0 };
+  } catch (e) {
+    if (e.limited) throw e;
+    console.warn("Search failed, answering without it", e);
+  }
+  return { text: await callClaude(system, messages), sources: [], searched: false };
 }
 
 // Streams text as it is written. Gemini first; if it fails or hits its free limit, Groq takes over.

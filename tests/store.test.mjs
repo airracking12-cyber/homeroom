@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { createStore, LS } from "../src/lib/store.js";
+import { createStore, LS, readOutcome } from "../src/lib/store.js";
+import { readFileSync } from "node:fs";
 
 // A tiny in-memory stand-in for the "kv" table, speaking just enough of Supabase's query chain.
 function fakeDb({ onBeforeUpdate, failInsertOnce = false, failUpsert = null } = {}) {
@@ -143,4 +144,53 @@ test("the class list asks for 'locked' (v29) and still works on a database that 
   asked.length = 0;
   assert.equal((await createStore(mk(2)).classes.list()).length, 1); // fell back twice, to the v8 columns
   assert.deepEqual(asked.map((c) => c.includes("locked") ? "locked" : c.includes("quarter") ? "quarter" : "base"), ["locked", "quarter", "base"]);
+});
+
+test("a read that could not reach the database is never treated as an empty list", () => {
+  assert.deepEqual(readOutcome(undefined, { cards: {} }), { ok: false }, "unreachable is not ok, so nothing may be saved");
+  const fresh = readOutcome(null, { cards: {}, log: [] });
+  assert.deepEqual(fresh, { ok: true, value: { cards: {}, log: [] } }, "nothing saved yet starts fresh");
+  const kept = readOutcome({ cards: { a: 1 }, extra: true }, { cards: {}, log: [] });
+  assert.deepEqual(kept.value, { cards: { a: 1 }, log: [], extra: true }, "saved data wins and missing parts are filled in");
+  assert.equal(readOutcome("not an object", { n: 1 }).value.n, 1, "junk in the row falls back to the empty shape");
+});
+
+test("study progress cannot be overwritten by a failed read: the hook checks the outcome and refuses to save before it has loaded", () => {
+  const app = readFileSync(new URL("../src/lib/study.js", import.meta.url), "utf8");
+  const hook = app.slice(app.indexOf("function useStudy("), app.indexOf("const missCard"));
+  assert.match(hook, /readOutcome\(v, \{ cards: \{\}, log: \[\], plan: null \}\)/);
+  assert.match(hook, /if \(!r\.ok\) \{ setFailed\(true\); return; \}/, "a failed read is a failed state, not an empty one");
+  assert.match(hook, /if \(!ref\.current\) return;/, "no change is saved before the real data has loaded");
+  assert.ok(!/fn\(ref\.current \|\|/.test(hook), "no fallback to an empty set when updating");
+  assert.match(hook, /addEventListener\("online", retry\)/, "it tries again when the connection returns");
+});
+
+/* ───────────── the build refuses to produce a blank site ───────────── */
+import { execFileSync } from "node:child_process";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { missingBuildEnv, buildEnvMessage } from "../tools/build-env.js";
+
+test("missing Supabase settings are named in plain words", () => {
+  assert.deepEqual(missingBuildEnv({}), ["VITE_SUPABASE_URL", "VITE_SUPABASE_ANON_KEY"]);
+  assert.deepEqual(missingBuildEnv({ VITE_SUPABASE_URL: "https://x.supabase.co", VITE_SUPABASE_ANON_KEY: "  " }), ["VITE_SUPABASE_ANON_KEY"], "blank counts as missing");
+  assert.deepEqual(missingBuildEnv({ VITE_SUPABASE_URL: "https://x.supabase.co", VITE_SUPABASE_ANON_KEY: "k" }), []);
+  const msg = buildEnvMessage(["VITE_SUPABASE_URL"]);
+  assert.match(msg, /VITE_SUPABASE_URL is not set/);
+  assert.match(msg, /blank page/);
+  assert.match(msg, /\.env\.local/);
+  assert.match(msg, /Build variables/);
+});
+
+test("vite build stops with that message when the settings are missing (run from an empty folder so no .env file can supply them)", () => {
+  const empty = mkdtempSync(`${tmpdir()}/hr-noenv-`);
+  try {
+    const clean = Object.fromEntries(Object.entries(process.env).filter(([k]) => !k.startsWith("VITE_")));
+    let out = "", failed = false;
+    try {
+      execFileSync(process.execPath, [new URL("../node_modules/vite/bin/vite.js", import.meta.url).pathname, "build", "--config", new URL("../vite.config.js", import.meta.url).pathname], { cwd: empty, env: clean, stdio: "pipe" });
+    } catch (e) { failed = true; out = `${e.stdout || ""}${e.stderr || ""}`; }
+    assert.ok(failed, "the build must not succeed without the settings");
+    assert.match(out, /The build stopped: VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY are not set/);
+  } finally { rmSync(empty, { recursive: true, force: true }); }
 });

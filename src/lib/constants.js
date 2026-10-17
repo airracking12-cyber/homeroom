@@ -20,10 +20,6 @@ export const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
 export const TYPES = ["Homework", "Mini Task", "Quiz", "Study", "Project", "Exam"];
 export const REVIEW_TYPES = ["Quiz", "Study", "Exam"];
 export const QUARTERS = [1, 2, 3, 4];
-export const MAX_PROOF = 6;
-// Quizzes, study sessions and exams are things you review for, so they never ask for a photo.
-export const needsProofType = (t) => !REVIEW_TYPES.includes(t.type);
-export const wantsProof = (t) => needsProofType(t) && t.proof !== false;
 export const PRIORITIES = ["High", "Medium", "Low"];
 export const STATUSES = [["todo", "Not started"], ["progress", "In progress"], ["done", "Done"]];
 export const DEFAULT_SUBJECTS = Object.keys(SUBJ);

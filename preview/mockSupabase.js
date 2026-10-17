@@ -1,5 +1,5 @@
 // A stand-in for the Supabase client, for local previews and screenshots only (see vite.preview.config.js). Nothing here ships.
-// Scenario comes from ?scn= : new (signed in, no ticket yet), pending (stamped, never finished the tour), returning (all done).
+// Scenario comes from ?scn= : new (signed in, no profile yet), pending (started the intro, never finished it), returning (all done), out (signed out).
 const q = new URLSearchParams(location.search);
 const scn = q.get("scn") || "returning";
 const today = new Date();
@@ -42,6 +42,11 @@ const classes = [{ id: "c1", year: 2026, name: "Grade 10 Atlas", label: "Grade 1
 
 function run(b) {
   const eq = Object.fromEntries(b.f.filter((x) => x[0] === "eq").map((x) => [x[1], x[2]]));
+  // Test switches (off by default): window.__MOCK_KV_FAIL = ["study"] makes single-row reads of keys containing that text fail
+  // like an unreachable database; window.__kvWrites lists the keys that were saved.
+  const failKeys = globalThis.__MOCK_KV_FAIL;
+  if (b.t === "kv" && b.op === "select" && failKeys && eq.key !== undefined && failKeys.some((x) => String(eq.key).includes(x))) return { data: null, error: { message: "mock: database unreachable" } };
+  if (b.t === "kv" && b.payload) (globalThis.__kvWrites = globalThis.__kvWrites || []).push(String(eq.key !== undefined ? eq.key : b.payload.key));
   let data = null;
   if (b.t === "profiles") data = b.op === "select" ? profile : null;
   else if (b.t === "classes") data = b.op === "select" ? classes : null;
@@ -99,7 +104,7 @@ export const supabase = {
     return { data: null, error: null };
   },
   auth: {
-    getSession: async () => ({ data: { session: { access_token: "t", user: { id: "u1", user_metadata: meta } } } }),
+    getSession: async () => ({ data: { session: scn === "out" ? null : { access_token: "t", user: { id: "u1", user_metadata: meta } } } }),
     updateUser: async ({ data }) => { Object.assign(meta, data); sessionStorage.setItem("mock:meta", JSON.stringify(meta)); window.__mockMeta = { ...meta }; return { data: {}, error: null }; },
     onAuthStateChange: (cb) => { listeners.add(cb); return { data: { subscription: { unsubscribe: () => listeners.delete(cb) } } }; },
     signOut: async () => ({ error: null }), signUp: async () => ({ data: {}, error: null }), signInWithPassword: async () => ({ data: {}, error: null }), resetPasswordForEmail: async () => ({ error: null }),

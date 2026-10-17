@@ -44,7 +44,7 @@ test("once loaded, a sound plays its recorded file (no synthesizer)", async () =
 });
 
 test("every sound the app uses has files in the bank", () => {
-  for (const n of ["tap", "pop", "add", "done", "undo", "send", "err", "bell", "rip", "whoosh", "stamp", "lift", "boxOpen", "schoolbell"]) assert.ok(BANK[n] && BANK[n].length, n);
+  for (const n of ["tap", "pop", "add", "done", "undo", "send", "err", "bell", "rip", "schoolbell"]) assert.ok(BANK[n] && BANK[n].length, n);
 });
 
 test("before the files arrive the old synthesized sound is used, so nothing is silent", () => {

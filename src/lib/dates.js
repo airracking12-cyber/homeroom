@@ -5,6 +5,8 @@ export const pad = (n) => String(n).padStart(2, "0");
 export const toISO = (d) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
 export const todayISO = () => toISO(new Date());
 export const parse = (iso) => { const [y, m, d] = iso.split("-").map(Number); return new Date(y, m - 1, d); };
+// A real calendar day, not just the right shape: "2026-02-31" matches YYYY-MM-DD but is not a date (it would show as Mar 3).
+export const isRealDate = (s) => typeof s === "string" && /^\d{4}-\d{2}-\d{2}$/.test(s) && toISO(parse(s)) === s;
 export const addDays = (iso, n) => { const d = parse(iso); d.setDate(d.getDate() + n); return toISO(d); };
 export const diffDays = (iso) => Math.round((parse(iso) - parse(todayISO())) / 864e5);
 export const fmtDate = (iso) => parse(iso).toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" });
