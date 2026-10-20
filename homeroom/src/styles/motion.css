@@ -1,0 +1,77 @@
+/* The motion system. FOUR reusable animations, each defined once, plus one celebration:
+     unpack  boxes open: a panel or sheet rises into place (the origin and distance come from --ux, --uy, --us)
+     pop-in  items settle into place, one after another (set --i on the item for the stagger)
+     stick   sticky notes peel and attach (set --tilt for the angle they rest at)
+     glow    the lamp and focus states: an opacity-only pulse on a light layer
+     celebrate  one burst when a study session is finished (transform and opacity, inside a decorative band)
+   Rules: only transform and opacity ever animate (glow is an opacity-animated layer, never an animated shadow or filter),
+   every tap shows a pressed state within 100ms, and reduced motion swaps every one of these for a short plain fade. */
+
+@keyframes unpack {
+  from { opacity: 0; transform: translate(var(--ux, 0px), var(--uy, 18px)) scale(var(--us, 0.94)); }
+  60%  { opacity: 1; transform: translate(0, -3px) scale(1.01); }
+  to   { opacity: 1; transform: none; }
+}
+@keyframes pop-in {
+  from { opacity: 0; transform: translateY(8px) scale(0.92); }
+  to   { opacity: 1; transform: none; }
+}
+@keyframes stick {
+  from { opacity: 0; transform: translateY(-16px) rotate(-7deg) scale(1.08); }
+  55%  { opacity: 1; transform: translateY(2px) rotate(calc(var(--tilt, 0deg) + 1.5deg)) scale(0.99); }
+  to   { opacity: 1; transform: rotate(var(--tilt, 0deg)); }
+}
+@keyframes glow {
+  from { opacity: 0.55; }
+  to   { opacity: 1; }
+}
+@keyframes fade-in { from { opacity: 0; } to { opacity: 1; } }
+@keyframes confetti {
+  0%   { opacity: 0; transform: translate3d(0, 0, 0) rotate(0deg); }
+  12%  { opacity: 1; }
+  100% { opacity: 0; transform: translate3d(var(--x, 0px), var(--y, 120px), 0) rotate(var(--r, 360deg)); }
+}
+
+.unpack { transform-origin: 50% 100%; animation: unpack var(--dur-4) var(--ease-settle) both; }
+.pop-in { animation: pop-in var(--dur-3) var(--ease-settle) both; animation-delay: calc(var(--i, 0) * 60ms); }
+.stick  { transform-origin: 50% 0; animation: stick var(--dur-4) var(--ease-settle) both; animation-delay: calc(var(--i, 0) * 80ms); }
+/* children of an unpacked box pop out one by one */
+.unpack-items > * { animation: pop-in var(--dur-3) var(--ease-settle) both; animation-delay: calc(var(--n, 1) * 60ms + 120ms); }
+.unpack-items > :nth-child(2) { --n: 2; } .unpack-items > :nth-child(3) { --n: 3; } .unpack-items > :nth-child(4) { --n: 4; }
+.unpack-items > :nth-child(5) { --n: 5; } .unpack-items > :nth-child(6) { --n: 6; } .unpack-items > :nth-child(7) { --n: 7; }
+.unpack-items > :nth-child(n + 8) { --n: 8; }
+
+/* glow: a soft light layer. Put it in a positioned box that has no text over it (a lamp, a bulb, a halo). */
+.glow-layer { position: absolute; inset: -40%; pointer-events: none; border-radius: 50%; background: radial-gradient(closest-side, var(--lamp-glow-strong), transparent); animation: glow 3.4s ease-in-out infinite alternate; }
+
+/* glow on focus: a soft halo OUTSIDE the control (a ring, so it never sits behind its text). The outline stays as the AA indicator. */
+.chip { position: relative; }
+.btn::after, .chip::after, .fab::after {
+  content: ""; position: absolute; inset: -5px; border-radius: inherit; border: 4px solid var(--lamp-glow-strong);
+  opacity: 0; transform: scale(0.96); pointer-events: none; transition: opacity var(--dur-2) var(--ease), transform var(--dur-2) var(--ease);
+}
+.btn:focus-visible::after, .chip:focus-visible::after, .fab:focus-visible::after { opacity: 1; transform: none; }
+
+/* press: every tappable thing answers the finger within 100ms, before any async work starts */
+.chip, .row-btn, .nav-item, .tech, .choice, .day, .seat, .mini-card, .scope-row, .m-btn, .dropzone, .room-obj {
+  transition: transform var(--dur-press) var(--ease);
+}
+.chip:active, .row-btn:active, .nav-item:active, .tech:active, .choice:active, .day:active, .seat:active, .mini-card:active, .scope-row:active, .m-btn:active, .dropzone:active, .room-obj:active {
+  transform: scale(0.98);
+}
+
+/* celebrate: a burst inside a decorative band above the finish card's text (never over it) */
+.celebrate { position: relative; height: 120px; overflow: hidden; pointer-events: none; }
+.celebrate i { position: absolute; left: 50%; top: 18px; width: 8px; height: 14px; border-radius: 2px; opacity: 0; animation: confetti 1.5s var(--ease) var(--d, 0s) both; }
+.celebrate i:nth-child(4n + 1) { background: var(--accent); }
+.celebrate i:nth-child(4n + 2) { background: var(--sage); }
+.celebrate i:nth-child(4n + 3) { background: var(--bulb-a); }
+.celebrate i:nth-child(4n)     { background: var(--wood-2); }
+
+/* reduced motion: every entrance becomes a short plain fade; the stripes and glows become a slow fade or sit still */
+@media (prefers-reduced-motion: reduce) {
+  .unpack, .pop-in, .stick, .reveal, .toast, dialog.sheet[open], .unpack-items > * { animation: fade-in 160ms linear both !important; animation-delay: 0s !important; }
+  .celebrate i { animation: fade-in 400ms linear var(--d, 0s) both !important; transform: translate(var(--x, 0px), calc(var(--y, 120px) * 0.4)); }
+  .sync::before { animation: glow 1.2s ease-in-out infinite alternate !important; transform: none !important; width: 100%; }
+  .chip:active, .row-btn:active, .nav-item:active, .tech:active, .choice:active, .day:active, .seat:active, .mini-card:active, .scope-row:active, .m-btn:active, .dropzone:active, .room-obj:active, .btn:active:not(:disabled) { transform: none; }
+}

@@ -1,0 +1,20 @@
+# Homeroom Gate
+# A student can join only while every task in their class's current quarter is marked done in Homeroom.
+# Nothing is stored on this server: each time someone joins, it asks Homeroom "is <name> allowed in?".
+
+supabase-url: "https://YOUR-PROJECT.supabase.co"      # Supabase > Project Settings > API > Project URL
+supabase-anon-key: "PASTE-THE-ANON-PUBLIC-KEY"         # the same anon key the Homeroom website uses (it is public)
+secret: "CHANGE-ME-to-a-long-random-text"              # must match mc_settings in supabase-minecraft.sql
+
+enabled: true            # false = let everybody in (handy for events or if Homeroom is down for a while)
+bypass-ops: true         # server operators are never blocked
+bypass-names: []         # extra names that are never blocked, e.g. ["Teacher_Name"]
+fail-open: false         # if Homeroom can't be reached: false = keep people out, true = let them in
+recheck-minutes: 10      # while someone is playing, check again every N minutes and remove them if they lost access (0 = off)
+
+# Messages use MiniMessage (https://docs.advntr.dev/minimessage/format.html). {done} and {total} are filled in.
+messages:
+  not-linked: "<gold>Homeroom Minecraft</gold>\n\n<white>This name isn't linked yet.</white>\n<gray>Finish all your tasks in Homeroom, then enter your Minecraft username in the pop-up.</gray>"
+  tasks-pending: "<gold>Homeroom Minecraft</gold>\n\n<white>You have <yellow>{done} of {total}</yellow> tasks done.</white>\n<gray>Mark every task done in Homeroom to get back in.</gray>"
+  unreachable: "<gold>Homeroom Minecraft</gold>\n\n<white>Couldn't reach Homeroom right now.</white>\n<gray>Try again in a minute.</gray>"
+  lost-access: "<gold>Homeroom Minecraft</gold>\n\n<white>A new task was added, so access is paused.</white>\n<gray>Finish it in Homeroom and you can rejoin.</gray>"

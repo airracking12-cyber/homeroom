@@ -1,0 +1,9 @@
+/* Settings and admin. Tokens only. (The Move-In Day tour and your room are styled in room.css.) */
+.set-row { display: flex; align-items: center; justify-content: space-between; gap: var(--s-4); padding: var(--s-3) var(--s-4); min-height: var(--touch); flex-wrap: wrap; }
+.set-row .grow { flex: 1 1 200px; min-width: 0; }
+.set-row .title { color: var(--ink); font-weight: 500; }
+.range { flex: 1 1 200px; accent-color: var(--accent-fill); min-height: var(--touch); }
+.about { background: var(--canvas); }
+.code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: var(--fs-small); background: var(--surface-2); color: var(--ink); padding: var(--s-2) var(--s-3); border-radius: var(--r-control); flex: 1; min-width: 0; overflow-wrap: anywhere; }
+
+.sug.unread { border-color: var(--accent-fill); }

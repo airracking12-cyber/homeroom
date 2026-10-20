@@ -1,0 +1,99 @@
+/* The room's furniture: string lights, corkboard, sticky notes, wood, and the lamp. Decoration FRAMES the screen:
+   nothing here sits behind or over text or controls. Anything that carries text sits on a solid token surface. */
+
+/* ── string lights: a strip at the top edge of the sticky top bar, in the space reserved by --lights-h ── */
+.topbar::before, .topbar::after {
+  content: ""; position: absolute; left: 0; right: 0; top: env(safe-area-inset-top, 0px); height: var(--lights-h); pointer-events: none;
+}
+.topbar::before {
+  background:
+    radial-gradient(circle at 14px 9px, var(--bulb-a) 0 3.5px, transparent 4px) 0 0 / 56px var(--lights-h) repeat-x,
+    radial-gradient(circle at 42px 9px, var(--bulb-b) 0 3.5px, transparent 4px) 0 0 / 56px var(--lights-h) repeat-x,
+    linear-gradient(var(--wire), var(--wire)) 0 3px / 100% 1px no-repeat;
+}
+/* the twinkle: a halo layer whose OPACITY pulses (never an animated shadow) */
+.topbar::after {
+  background:
+    radial-gradient(circle at 14px 9px, var(--lamp-glow-strong) 0 7px, transparent 8px) 0 0 / 56px var(--lights-h) repeat-x,
+    radial-gradient(circle at 42px 9px, var(--lamp-glow) 0 7px, transparent 8px) 0 0 / 56px var(--lights-h) repeat-x;
+  animation: glow 2.8s ease-in-out infinite alternate;
+}
+@media (max-height: 480px) and (orientation: landscape) and (max-width: 767px) { .topbar::before, .topbar::after { display: none; } }
+
+/* ── corkboard: a frame for sticky notes. Text never sits on cork itself, only on the notes pinned to it ── */
+.cork {
+  position: relative; padding: var(--s-4); border: 4px solid var(--wood); border-radius: var(--r-card);
+  background:
+    radial-gradient(circle at 20% 30%, var(--cork-2) 0 1.5px, transparent 2px) 0 0 / 14px 14px,
+    radial-gradient(circle at 70% 60%, var(--cork-2) 0 1px, transparent 1.5px) 0 0 / 9px 9px,
+    var(--cork);
+}
+
+/* ── sticky notes ── */
+.note { position: relative; background: var(--note-1); color: var(--on-note); border-radius: 3px 3px 16px 3px; box-shadow: var(--shadow-note); padding: var(--s-3) var(--s-4); transform: rotate(var(--tilt, 0deg)); }
+.note-2 { background: var(--note-2); } .note-3 { background: var(--note-3); }
+.note b, .note strong, .note h2, .note h3 { color: var(--on-note); }
+.pin::before { content: ""; position: absolute; top: -6px; left: 50%; width: 12px; height: 12px; margin-left: -6px; border-radius: 50%; background: var(--accent); box-shadow: var(--shadow-note); }
+
+/* ── wood and sage: shelf edges, frames, leaves ── */
+.wood { background: repeating-linear-gradient(90deg, var(--wood) 0 7px, var(--wood-2) 7px 8px); border-radius: var(--r-control); }
+.leaf { fill: var(--sage); } .leaf-dark { fill: var(--sage-ink); } .pot { fill: var(--wood); }
+
+/* ── the lamp: the night-mode control. The glow is a layer whose opacity pulses; the button itself stays a plain, readable control ── */
+.lamp { position: relative; isolation: isolate; }
+.lamp .glow-layer { z-index: -1; opacity: 0; }
+:root[data-theme="dark"] .lamp .glow-layer { opacity: 1; }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]):not([data-theme="dark"]) .lamp .glow-layer { opacity: 1; } }
+
+/* ── your room: the home screen. Every word sits on a solid card; the decoration is the art tiles and the floor ── */
+.home-link { display: inline-flex; align-items: center; min-height: var(--touch); text-decoration: none; border-radius: var(--r-control); }
+.room-grid { display: grid; gap: var(--s-3); grid-template-columns: 1fr; list-style: none; padding: 0; margin: 0; }
+@media (min-width: 640px) { .room-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (min-width: 1024px) { .room-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+.room-obj {
+  display: flex; align-items: center; gap: var(--s-4); width: 100%; min-height: 96px; padding: var(--s-3) var(--s-4) var(--s-3) var(--s-3);
+  background: var(--surface); border: 1px solid var(--hairline); border-radius: var(--r-card); box-shadow: var(--shadow-paper);
+  text-align: left; color: inherit; text-decoration: none;
+}
+.room-obj[aria-pressed="true"] { border-color: var(--accent-fill); }
+@media (hover: hover) { .room-obj:hover { background: var(--surface-2); } }
+.room-art { position: relative; isolation: isolate; flex: none; display: grid; place-items: center; width: 72px; height: 72px; background: var(--canvas); border: 1px solid var(--hairline); border-radius: var(--r-control); overflow: hidden; }
+.room-art .glow-layer { inset: -10%; z-index: -1; } /* the lamp's light lives behind the picture only, never behind words */
+.room-art .art { width: 56px; height: 56px; }
+.room-text { min-width: 0; display: grid; gap: 2px; }
+.room-label { font-family: var(--font-display); font-synthesis: none; font-size: 24px; line-height: 1.1; color: var(--ink); }
+.room-where { font-size: var(--fs-caption); color: var(--muted); }
+.room-status { font-size: var(--fs-small); color: var(--body); margin-top: var(--s-1); }
+.room-floor { position: relative; height: 84px; margin-top: var(--s-8); pointer-events: none; }
+.room-floor .wood { position: absolute; left: 0; right: 0; bottom: 0; height: 12px; }
+.room-floor .plant { position: absolute; right: var(--s-5); bottom: 12px; width: 64px; height: 72px; }
+/* the lamp in the top bar: on = a warm shade */
+.lamp[aria-pressed="true"] svg { color: var(--accent-text); fill: var(--lamp-glow-strong); }
+
+/* the furniture's colours: tokens only */
+.a-wood { fill: var(--wood); } .a-wood2 { fill: var(--wood-2); } .a-cork { fill: var(--cork); } .a-pin { fill: var(--accent); }
+.a-n1 { fill: var(--note-1); } .a-n2 { fill: var(--note-2); } .a-n3 { fill: var(--note-3); }
+.a-paper { fill: var(--raised); stroke: var(--hairline); stroke-width: 1; } .a-accent { fill: var(--accent); } .a-sage { fill: var(--sage); }
+.a-ink { fill: var(--ink); } .a-bulb { fill: var(--bulb-a); }
+
+/* ── Move-In Day: the tour. A dimmed room with one real element lit; the card never covers what it points at ── */
+.tour { position: fixed; inset: 0; z-index: 90; }
+.tour[hidden] { display: none; }
+.tour-scrim { position: fixed; background: var(--scrim); animation: fade-in var(--dur-2) var(--ease) both; }
+.tour-ring { position: fixed; border-radius: var(--r-control); border: 3px solid var(--accent); pointer-events: none; }
+.tour-ring::after { content: ""; position: absolute; inset: -8px; border-radius: calc(var(--r-control) + 6px); border: 5px solid var(--lamp-glow-strong); animation: glow 1.4s ease-in-out infinite alternate; }
+.tour-layer { position: fixed; inset: 0; display: flex; justify-content: center; align-items: center; padding: var(--s-4); pointer-events: none; }
+.tour-layer[data-side="top"] { align-items: flex-start; padding-top: calc(env(safe-area-inset-top, 0px) + var(--s-4)); }
+.tour-layer[data-side="bottom"] { align-items: flex-end; padding-bottom: calc(var(--nav-h) + env(safe-area-inset-bottom, 0px) + var(--s-4)); }
+@media (min-width: 768px) { .tour-layer { padding-left: calc(var(--rail-w) + var(--s-4)); } .tour-layer[data-side="bottom"] { padding-bottom: var(--s-6); } }
+@media (min-width: 1024px) { .tour-layer { padding-left: calc(var(--side-w) + var(--s-4)); } }
+.tour-card {
+  position: relative; pointer-events: auto; width: min(100%, 420px); max-height: 100%; overflow-y: auto; display: grid; gap: var(--s-3);
+  padding: var(--s-5); background: var(--raised); color: var(--body); border: 1px solid var(--hairline); border-radius: var(--r-large); box-shadow: var(--shadow-float);
+}
+.tour-card h2 { font-size: var(--fs-h2); outline: none; }
+.tour-credit { color: var(--muted); }
+.tour-dots { display: flex; gap: var(--s-2); }
+.tour-dots i { width: 8px; height: 8px; border-radius: 50%; background: var(--surface-2); border: 1px solid var(--border); }
+.tour-dots i[data-on] { background: var(--accent-fill); border-color: var(--accent-fill); }
+.tour-actions { display: flex; flex-wrap: wrap; gap: var(--s-2); align-items: center; }
