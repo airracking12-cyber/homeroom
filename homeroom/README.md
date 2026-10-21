@@ -11,7 +11,7 @@ A shared homework list for a class, with a study assistant. React + Vite. Supaba
    **Already running v27 or earlier? Run `supabase/upgrade-v28.sql` once** (see `UPGRADE-v28.md`). It closes a class-switching hole and moves notes into their own tables.
    **Then run `supabase/upgrade-v29.sql`** (see `UPGRADE-v29.md`) if you want optional join codes for classes.
    **Then run `supabase/upgrade-v30.sql`** (see `UPGRADE-v30.md`) for the notes library (Review > Notes): kept original files, student-made reviewers, better search ranking.
-4. Open the app and create your own account (just email and password). On your first sign-in you set up your profile (your name and your class), then a short introduction walks you through Track, Review and Prepare. Then in the SQL Editor run:
+4. Open the app and create your own account (just email and password). On your first sign-in you set up your profile (your name and your class), then Move-In Day begins: an unboxing that puts your room together one piece at a time. Then in the SQL Editor run:
        update public.profiles set is_admin = true where username = 'yourname';
    Sign out and back in. You now see the admin screen.
 
@@ -45,7 +45,7 @@ Get the AI keys at aistudio.google.com and console.groq.com/keys. Never put them
 
 ## What's in it
 
-**Sign-up and your profile.** Creating an account asks only for an email and a password. The first time someone signs in they pick a username and their class (or add the class if it isn't listed), and then a short introduction starts. Anyone whose profile has no username yet (for example someone who closed the tab halfway) gets the profile screen again next time, and anyone who left the introduction half-way is sent back into it. It can be replayed from Settings > Help.
+**Sign-up and your profile.** Creating an account asks only for an email and a password. The first time someone signs in they pick a username and their class (or add the class if it isn't listed), and then Move-In Day (the unboxing) starts. Anyone whose profile has no username yet (for example someone who closed the tab halfway) gets the profile screen again next time, and anyone who left Move-In Day half-way is sent back into it. It can be replayed from Settings > Replay Move-In Day.
 
 **Your class (Class > Classmates).** Everyone in the class is a seat on a 2+2 or 3+3 map. A green dot means online. The dot on each seat shows this week's progress: Complete, Almost there (60%+), Starting, or Nothing. Tap someone who is online for a temporary chat that is never stored. The chips above the map pick a subject and grey out everyone who isn't in a group with you for it. Join a group under Class > Groups; your groupmates then show their subject colour.
 
@@ -97,10 +97,10 @@ Plain-key shortcuts pause while a sheet is open. Sheets are native dialogs, so t
 - **Sounds** are files in `public/sounds/v2/`, made by the scripts in `tools/` (you only need those to change a sound; see `tools/README.md`). `src/lib/sound.js` plays them and falls back to synthesized sounds if one fails to load.
 - **Code layout:** the look is in `src/styles/` (all values in `tokens.css`, described in `DESIGN.md`); screens are in `src/app/` (one folder per destination); the rules and logic are in `src/lib/` and are covered by `npm test`. Adding a colour or a size? `tests/contrast.test.mjs` and `tests/design.test.mjs` will tell you if it fails WCAG AA or drifts off the system. `docs/REBUILD-v34.md` has the audit, the feature inventory and the navigation map.
 
-## The introduction
-Five screens: what Homeroom is, then three small things to actually do (add a real task, turn pasted notes into flashcards, start a plan), then closing credits. Calm pacing, nothing bounces, every screen has a **Skip intro** button, and it remembers where you were if you close the tab. Replay it from Settings > Help. Its steps and the credit text are plain data in `src/app/intro/machine.js`, tested in `tests/intro.test.mjs`.
+## Move-In Day (the introduction)
+An unboxing. Your room is bare and a moving box sits on the floor: open it, and put one piece in its place at a time. Each piece lights up the real part of the app it stands for: the corkboard is Track, the bookshelf is Review, the desk lamp is night mode (and Ask is your roommate), and the last piece is your first real notes, added for real, which end up on the shelf (there is no "all done" screen). Five steps at most, under a minute and a half, skippable at any moment (Skip tour, or Esc), and it remembers where you were. Focus moves to every card, the page behind is locked while a card is up, and with reduced motion everything is a plain fade. People who already had an account are only OFFERED it, once, on their room's page, and saying no changes nothing. Replay it from Settings > Replay Move-In Day. Its steps and the credit text are plain data in `src/app/tour/machine.js`, the box and furniture are drawn in `src/app/tour/art.jsx`, and the behaviour is in `src/app/tour/Tour.jsx`, tested in `tests/tour.test.mjs`.
 
 **When you add a feature,** give it one clear home in the navigation (`src/app/nav.js`) and add a line to `FEATURE_HOME` there; `tests/nav.test.mjs` checks the list.
 
 ## Credits
-Homeroom was designed, built and maintained, start to finish, by Nathaniel Visaya ("Nathan") for his class. His name is on the last screen of the introduction, in Settings > About, on the sign-in screen, in the page's metadata and in the browser console.
+Homeroom was designed, built and maintained, start to finish, by Nathaniel Visaya ("Nathan") for his class. His name is on the shipping box at the start of Move-In Day, in Settings > About, on the sign-in screen, in the page's metadata and in the browser console.

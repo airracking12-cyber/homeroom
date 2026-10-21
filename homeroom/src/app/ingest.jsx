@@ -5,6 +5,9 @@ import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { notes, store } from "../lib/services.js";
 import { uid } from "../lib/helpers.js";
 import { suggestTopic } from "../lib/review-ai.js";
+import { callClaude, parseJSON } from "../lib/ai.js";
+import { claim } from "../lib/claims.js";
+import { PRACTICE_SYSTEM, practicePrompt, parsePractice, practiceKey, mergePractice, missingIdeas, BATCH } from "../lib/practice.js";
 import { matchTopic } from "../lib/notes.js";
 import { makeChunks, planParts, deriveTitle, newJob, runIngest, progressOf, coverage, stageText, makePacer } from "../lib/ingest.js";
 import { ideasForChunk, transcribe, imageBlock, pdfParts, pdfPartBlock, partLabel, isPdf, isImage, readText } from "../lib/ingest-ai.js";
@@ -13,7 +16,7 @@ import { Bar, Button } from "./ui.jsx";
 const cap = (s) => s.charAt(0).toUpperCase() + s.slice(1);
 const RESUME = new Set(["running", "paused"]);
 
-export function useIngest({ user, classRef, saveNote, markInventory, relabel, topicNames, toast }) {
+export function useIngest({ user, classRef, saveNote, markInventory, relabel, topicNames, noteInfo, toast }) {
   const jobs = useRef(new Map());
   const [view, setView] = useState([]);
   const waiting = useRef(false);
@@ -29,7 +32,7 @@ export function useIngest({ user, classRef, saveNote, markInventory, relabel, to
   // autosave: this device at once, and the database in the background (never slows the reading down)
   const queue = useRef(Promise.resolve());
   const save = useCallback(() => {
-    const payload = { v: 1, jobs: Object.fromEntries([...jobs.current].map(([id, e]) => [id, { kind: e.kind, title: e.title, subject: e.subject, topic: e.topic, noteId: e.noteId, noteKind: e.noteKind, taskId: e.taskId, taskTitle: e.taskTitle, file: e.file, parts: e.parts, texts: e.texts, isImage: e.isImage, job: e.job }])) };
+    const payload = { v: 1, jobs: Object.fromEntries([...jobs.current].filter(([, e]) => e.kind !== "practice").map(([id, e]) => [id, { kind: e.kind, title: e.title, subject: e.subject, topic: e.topic, noteId: e.noteId, noteKind: e.noteKind, taskId: e.taskId, taskTitle: e.taskTitle, file: e.file, parts: e.parts, texts: e.texts, isImage: e.isImage, job: e.job }])) };
     try { localStorage.setItem(`hr:ingest:${user}`, JSON.stringify(payload)); } catch { /* storage full or blocked */ }
     queue.current = queue.current.then(() => store.set(`u:${user}:ingest`, payload, true)).catch(() => {});
   }, [user]);
@@ -51,6 +54,17 @@ export function useIngest({ user, classRef, saveNote, markInventory, relabel, to
         callChunk: (c) => ideasForChunk(c, { title: e.title, subject: e.subject }),
         loadIdeas: async () => (await notes.ideasFor([e.noteId]))[e.noteId]?.ideas || [],
         saveIdeas: async (list) => { const n = await notes.saveIdeas(e.noteId, "ai", list); if (n == null || n < list.length) return null; markInventory(e.noteId, { ideas: list, src: "ai" }); return n; },
+      };
+    }
+    if (e.kind === "practice") {
+      const key = practiceKey(classRef.current, e.noteId);
+      return { ...base, short: () => false, max: Infinity, // a batch of ideas is one chunk; what is stored is the progress
+        callChunk: async (c) => {
+          const parsed = parsePractice(parseJSON(await callClaude(PRACTICE_SYSTEM, [{ role: "user", content: practicePrompt(c.batch, { subject: e.subject, title: e.title }) }])), c.batch);
+          return Object.entries(parsed).map(([bi, p]) => ({ t: `idea ${c.batch[bi].idx}`, d: "", p }));
+        },
+        loadIdeas: async () => { const row = await store.get(key, true); return Object.entries((row && row.items) || {}).map(([i, p]) => ({ t: `idea ${i}`, d: "", p })); },
+        saveIdeas: async (list) => { const add = {}; list.forEach((x) => { add[Number(x.t.slice(5))] = x.p; }); const ok = await store.update(key, (cur) => mergePractice(cur, add), null); return ok ? list.length : null; },
       };
     }
     return { ...base, short: () => false, max: Infinity,   // a file is copied page group by page group; each copy is kept in the job
@@ -103,7 +117,8 @@ export function useIngest({ user, classRef, saveNote, markInventory, relabel, to
     e.ctl = null; waiting.current = false; save(); publish();
     if (e.job.covered) {
       if (e.kind === "file") await finish(e);
-      else toast?.(`\u201c${e.title}\u201d is ready to study`);
+      else if (e.kind === "practice") { jobs.current.delete(e.id); publish(); toast?.(`Practice questions for \u201c${e.title}\u201d are ready`); }
+      else { if (!document.documentElement.dataset.movedIn) toast?.(`\u201c${e.title}\u201d is ready to study`); /* the move-in welcome has the stage for a few seconds */ fns.current.startPractice?.({ noteId: e.noteId, title: e.title, subject: e.subject }); }
     }
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -115,6 +130,27 @@ export function useIngest({ user, classRef, saveNote, markInventory, relabel, to
     save(); publish(); run(n.noteId);
   }, [run, save, publish]);
   fns.current.startIdeas = startIdeas;
+
+  // Practice questions are written ONCE per note for the whole class, by whoever claims it first. What is already stored is never
+  // written again, so a stop (or a classmate finishing first) just means fewer left to do.
+  const startPractice = useCallback(async ({ noteId, title, subject }) => {
+    const id = `${noteId}:p`;
+    if (jobs.current.has(id)) return;
+    const ideas = (await notes.ideasFor([noteId]))[noteId]?.ideas || [];
+    if (!ideas.length) return;
+    const key = practiceKey(classRef.current, noteId);
+    const missing = missingIdeas(await store.get(key, true), ideas.length);
+    if (!missing.length) return;
+    const c = await claim(store, `${classRef.current}:claim:practice:${noteId}`, user);
+    if (!c.won) return; // a classmate is already on it
+    const batches = []; for (let i = 0; i < missing.length; i += BATCH) batches.push(missing.slice(i, i + BATCH).map((idx) => ({ idx, t: ideas[idx].t, d: ideas[idx].d })));
+    const chunks = batches.map((b, i) => ({ i, section: "", text: `Questions for ideas ${b[0].idx + 1} to ${b[b.length - 1].idx + 1}`, batch: b }));
+    const job = newJob({ id, noteId, title, chunks });
+    jobs.current.set(id, { id, kind: "practice", title, subject, noteId, chunks, job });
+    publish(); run(id);
+  }, [user, publish]); // eslint-disable-line react-hooks/exhaustive-deps
+  fns.current.startPractice = startPractice;
+  const ensurePractice = useCallback((noteIds) => { noteIds.forEach((nid) => { const m = noteInfo(nid); if (m) startPractice({ noteId: nid, title: m.title, subject: m.subject }); }); }, [startPractice, noteInfo]);
 
   // One confirm: the raw input is saved first (pasted text as a note, a file as its untouched original), then reading begins.
   const start = useCallback(async ({ text, files, title, subject, topic, kind, taskId, taskTitle }) => {
@@ -181,19 +217,19 @@ export function useIngest({ user, classRef, saveNote, markInventory, relabel, to
     return () => { dead = true; };
   }, [user]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  return useMemo(() => ({ jobs: view, start, cancel, retry, reprocess, dismiss, moveRest, keepWhatWasRead }), [view, start, cancel, retry, reprocess, dismiss, moveRest, keepWhatWasRead]);
+  return useMemo(() => ({ jobs: view, start, startIdeas, ensurePractice, cancel, retry, reprocess, dismiss, moveRest, keepWhatWasRead }), [view, start, startIdeas, ensurePractice, cancel, retry, reprocess, dismiss, moveRest, keepWhatWasRead]);
 }
 
 // One note being read.
 export function IngestCard({ item, ingest }) {
   const { job } = item;
   const p = progressOf(job), cov = coverage(job);
-  const file = item.kind === "file";
-  const stage = job.covered ? stageText(job) : item.running ? (item.waiting ? stageText(job, true) : file ? "Reading your file" : stageText(job)) : stageText(job);
+  const file = item.kind === "file", prac = item.kind === "practice";
+  const stage = job.covered ? stageText(job) : item.running ? (item.waiting ? stageText(job, true) : file ? "Reading your file" : prac ? "Writing practice questions" : stageText(job)) : stageText(job);
   const needs = !job.covered && !item.running && (job.state === "attention" || job.state === "full");
   return (
     <section className="card ingest" aria-label={`Reading ${item.title}`}>
-      <div className="ingest-head"><b className="ingest-title">{item.title}</b><span className="badge">{file ? "Your file" : "Study ideas"}</span></div>
+      <div className="ingest-head"><b className="ingest-title">{item.title}</b><span className="badge">{file ? "Your file" : prac ? "Practice" : "Study ideas"}</span></div>
       <Bar value={p.pct} label={`${item.title}: ${p.pct} percent`} />
       <p className="small"><b>{p.label}</b> &middot; {p.pct}%</p>
       <p className="small muted" role="status">{stage}</p>

@@ -37,7 +37,7 @@ const PAIRS = [
   ["sage-ink", "canvas", TEXT, "sage text and icons on canvas"], ["sage-ink", "surface", TEXT, "sage text on cards"], ["sage-ink", "sage-wash", TEXT, "sage text on its wash"], ["sage-ink", "raised", TEXT, "sage text on sheets"],
   ["ink", "wood-wash", TEXT, "text on a wood wash"], ["muted", "wood-wash", TEXT, "secondary text on a wood wash"],
   ["on-note", "note-1", TEXT, "sticky note, butter"], ["on-note", "note-2", TEXT, "sticky note, sage"], ["on-note", "note-3", TEXT, "sticky note, blush"],
-  ["accent-fill", "wood-wash", LARGE, "selected states on a wood wash"], ["wood", "wood-wash", LARGE, "banner icons on the wood wash"],
+  ["accent-fill", "wood-wash", LARGE, "selected states on a wood wash"], ["wood", "wood-wash", LARGE, "banner icons on the wood wash"], ["ink", "warn-wash", TEXT, "mismatch and missed-parts notes"], ["ink", "ok-wash", TEXT, "correct feedback"], ["ok", "ok-wash", TEXT, "key points you covered"],
   // the bright accent is only for big decoration; progress rings, selected icons and bars use the deeper fill
   ["accent-fill", "canvas", LARGE, "progress and selected states on canvas"], ["accent-fill", "surface", LARGE, "progress and selected states on cards"], ["accent-fill", "raised", LARGE, "selected states on sheets"],
 ];

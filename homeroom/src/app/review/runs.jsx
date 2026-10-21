@@ -5,8 +5,8 @@ import { ChevronLeft, Check } from "lucide-react";
 import { subjColor } from "../../lib/constants.js";
 import { todayISO, addDays, relLabel, parse, weekStartOf } from "../../lib/dates.js";
 import { Sound } from "../../lib/sound.js";
-import { shuffle, norm, sameAnswer, maskIdea, missCard, logSession, BOX_DAYS, TECHS, buildQuiz } from "../../lib/study.js";
-import { askTricks, markTeach, markBlurt } from "../../lib/review-ai.js";
+import { shuffle, norm, sameAnswer, maskIdea, missCard, logSession, BOX_DAYS, TECHS, mcFallback } from "../../lib/study.js";
+import { itemFor, mcFor, checkPoints, keyPointsOf } from "../../lib/practice.js";
 import { Button, Chip, Dots, Bar, cx } from "../ui.jsx";
 
 export function RunShell({ title, sub, step, total, onExit, children, exitLabel = "Back to study" }) {
@@ -169,28 +169,19 @@ export function MatchRun({ ideas, update, onExit, label }) {
 }
 
 /* Memory tricks: an image, rhyme or acronym for each idea. */
-export function MnemonicRun({ ideas, onExit }) {
+export function MnemonicRun({ ideas, practice, onExit }) {
   const groups = useMemo(() => { const sh = ideas.slice(0, 40); const g = []; for (let i = 0; i < sh.length; i += 5) g.push(sh.slice(i, i + 5)); return g; }, [ideas]);
   const [shown, setShown] = useState(1);
-  const [res, setRes] = useState({});
-  useEffect(() => {
-    const gi = shown - 1;
-    if (res[gi] || !groups[gi]) return undefined;
-    let dead = false;
-    (async () => {
-      try { const map = await askTricks(groups[gi]); if (!dead) setRes((r) => ({ ...r, [gi]: { tricks: map, ai: Object.keys(map).length > 0 } })); }
-      catch { if (!dead) setRes((r) => ({ ...r, [gi]: { tricks: {}, ai: false } })); }
-    })();
-    return () => { dead = true; };
-  }, [shown, groups]); // eslint-disable-line react-hooks/exhaustive-deps
+  // each idea's trick was written once, when the class's notes were read; nothing is asked of the assistant while you study
+  const res = useMemo(() => Object.fromEntries(groups.map((g, gi) => { const tricks = g.map((x) => itemFor(practice, x.id)?.tr || ""); return [gi, { tricks, ai: tricks.some(Boolean) }]; })), [groups, practice]);
   return (
     <RunShell title="Memory tricks" sub="Say each one out loud, and picture it." onExit={onExit}>
       <div className="stack">
         {groups.slice(0, shown).map((g, gi) => (
           <div className="card stack" key={gi} style={{ gap: 12 }}>
             <p className="eyebrow">{g[0].subject}, {g[0].mt}</p>
-            {!res[gi] && <p className="muted" role="status">Thinking up tricks<Dots /></p>}
-            {res[gi] && !res[gi].ai && <p className="trick"><b>{g.map((x) => (x.t || "?")[0].toUpperCase()).join("")}</b> Make a sentence where each word starts with these letters, in this order: {g.map((x) => x.t).join(", ")}.</p>}
+            {!res[gi].ai && <p className="caption">Memory tricks for these notes are still being written. Here is a quick one to start with.</p>}
+            {!res[gi].ai && <p className="trick"><b>{g.map((x) => (x.t || "?")[0].toUpperCase()).join("")}</b> Make a sentence where each word starts with these letters, in this order: {g.map((x) => x.t).join(", ")}.</p>}
             {g.map((x, i) => <div className="fix" key={x.id}><b>{x.t}</b><span>{x.d}</span>{res[gi]?.tricks[i] && <p className="trick">{res[gi].tricks[i]}</p>}</div>)}
           </div>
         ))}
@@ -206,31 +197,32 @@ export function TeachRun({ ideas, study, update, onExit, label }) {
   const [idx, setIdx] = useState(0);
   const [text, setText] = useState("");
   const [fb, setFb] = useState(null);
-  const [busy, setBusy] = useState(false);
+  const [stage, setStage] = useState("write"); // write -> rate (see a good answer and the key points) -> feedback
   const [solid, setSolid] = useState(0);
   if (items.length === 0) return <RunShell title="Teach it back" onExit={onExit}><Finish title="Nothing to teach yet" lines={["Add some notes first."]} onExit={onExit} /></RunShell>;
   if (idx >= items.length) return <RunShell title="Teach it back" onExit={onExit}><Finish title="Well explained" lines={[`${solid} of ${items.length} came out solid.`, "Anything shaky is now at the front of your flashcards."]} onExit={onExit} /></RunShell>;
   const it = items[idx];
-  const check = async () => {
-    setBusy(true);
-    let r = null;
-    try { r = await markTeach(it, text); } catch { /* fall through to the plain check */ }
-    if (!r) {
-      const hit = it.c && norm(text).includes(norm(it.c));
-      const words = norm(it.d).split(" ").filter((w) => w.length > 4), have = words.filter((w) => norm(text).includes(w)).length;
-      const v = hit && have / Math.max(1, words.length) > 0.4 ? "solid" : hit || have > 1 ? "partly" : "not yet";
-      r = { verdict: v, good: hit ? `You used the key word, ${it.c}.` : "", missing: v === "solid" ? "" : "Compare with the notes below.", simpler: "" };
-    }
-    setFb(r); setBusy(false);
-    if (r.verdict === "solid") { setSolid((n) => n + 1); Sound.play("done"); } else { update((s) => missCard(s, it.id)); Sound.play("pop"); }
-    if (idx === items.length - 1) update((s) => logSession(s, "teach", label, items.length, solid + (r.verdict === "solid" ? 1 : 0)));
+  const points = keyPointsOf(it), cp = stage === "rate" ? checkPoints(text, points) : null;
+  const rate = (v) => { // you judge your own answer against the key points; the result is saved straight away
+    const r = { verdict: v === 1 ? "solid" : v === 0.5 ? "partly" : "not yet", good: cp && cp.hit.length ? `You covered: ${cp.hit.join(", ")}.` : "", missing: cp && cp.missed.length && v < 1 ? `Still to include: ${cp.missed.join(", ")}.` : "", simpler: "" };
+    setFb(r); setStage("write");
+    if (v === 1) { setSolid((n) => n + 1); Sound.play("done"); } else { update((s) => missCard(s, it.id)); Sound.play("pop"); }
+    if (idx === items.length - 1) update((s) => logSession(s, "teach", label, items.length, solid + (v === 1 ? 1 : 0)));
   };
   return (
     <RunShell title="Teach it back" sub={<Sub it={it} />} step={idx} total={items.length} onExit={onExit}>
       <div className="card stack">
         <p className="display q-text">Explain <b>{it.t}</b> as if you&rsquo;re teaching a younger student.</p>
         <textarea className="textarea" rows={5} autoFocus aria-label="Your explanation" value={text} disabled={!!fb} placeholder="In your own words, no peeking at the notes..." onChange={(e) => setText(e.target.value)} />
-        {!fb && <Button variant="primary" size="lg" block disabled={text.trim().length < 12 || busy} onClick={check}>{busy ? <>Reading your explanation<Dots /></> : "Check my explanation"}</Button>}
+        {!fb && stage === "write" && <Button variant="primary" size="lg" block disabled={text.trim().length < 12} onClick={() => setStage("rate")}>Show me a good answer</Button>}
+        {!fb && stage === "rate" && (
+          <div className="stack">
+            <div className="fix"><b>A good answer</b><span>{it.d}</span></div>
+            <ul className="checklist" aria-label="Key points">{points.map((p) => <li key={p} data-hit={cp.hit.includes(p) ? "1" : "0"}><span className="sr-only">{cp.hit.includes(p) ? "You mentioned: " : "You didn't mention: "}</span>{p}</li>)}</ul>
+            <p className="small muted" id="teach-rate">How did your explanation compare?</p>
+            <div className="conf-row" role="group" aria-labelledby="teach-rate">{[[1, "Got it"], [0.5, "Partly"], [0, "Not yet"]].map(([v, l]) => <button key={v} type="button" className="conf-btn" onClick={() => rate(v)}>{l}</button>)}</div>
+          </div>
+        )}
         {fb && (
           <div className={cx("feedback", fb.verdict === "solid" ? "ok" : "no")} role="status">
             <b>{fb.verdict === "solid" ? "Solid." : fb.verdict === "partly" ? "Partly there." : "Not yet."}</b>
@@ -249,30 +241,18 @@ export function BlurtRun({ ideas, update, onExit, label }) {
   const topics = useMemo(() => { const m = new Map(); ideas.forEach((i) => { if (!m.has(i.mid)) m.set(i.mid, { mid: i.mid, title: i.mt, subject: i.subject, list: [] }); m.get(i.mid).list.push(i); }); return [...m.values()]; }, [ideas]);
   const [topic, setTopic] = useState(null);
   const [text, setText] = useState("");
-  const [busy, setBusy] = useState(false);
   const [out, setOut] = useState(null);
   const mixRef = useRef(null);
   if (topic === "mix" && !mixRef.current) mixRef.current = shuffle(ideas).slice(0, 20);
   const set = topic === "mix" ? mixRef.current || [] : topic ? topics.find((t) => t.mid === topic)?.list.slice(0, 40) || [] : [];
-  const grade = async () => {
-    setBusy(true);
-    let res = null;
-    try {
-      const j = await markBlurt(set, text);
-      if (j && (Array.isArray(j.got) || Array.isArray(j.missed))) {
-        const ok = (a) => (Array.isArray(a) ? a.map(Number).filter((n) => n >= 1 && n <= set.length) : []);
-        const got = new Set(ok(j.got)), partly = new Set(ok(j.partly).filter((n) => !got.has(n)));
-        const missed = set.map((_, i) => i + 1).filter((n) => !got.has(n) && !partly.has(n)); // anything not marked counts as missed, so nothing slips through
-        res = { got: [...got], partly: [...partly], missed, wrong: Array.isArray(j.wrong) ? j.wrong.filter((w) => w && w.said).slice(0, 6) : [] };
-      }
-    } catch { /* fall through to the plain check */ }
-    if (!res) {
-      const t = norm(text), got = [], missed = [];
-      set.forEach((x, i) => { const hit = (x.c && x.c.length >= 3 && t.includes(norm(x.c))) || norm(x.t).split(" ").filter((w) => w.length > 3).some((w) => t.includes(w)); (hit ? got : missed).push(i + 1); });
-      res = { got, partly: [], missed, wrong: [], plain: true };
-    }
-    setOut(res); setBusy(false); Sound.play("done");
-    update((s) => logSession(s, "blurt", label, set.length, res.got.length));
+  // Checked on this device: an idea counts as remembered when your writing covers most of its key points. It is a guide, and
+  // anything marked missed is shown with the note's own words so you can judge for yourself.
+  const grade = () => {
+    const got = [], partly = [], missed = [];
+    set.forEach((x, i) => { const r = checkPoints(text, keyPointsOf(x)).ratio; (r >= 0.6 ? got : r >= 0.3 ? partly : missed).push(i + 1); });
+    const res = { got, partly, missed, wrong: [], plain: true };
+    setOut(res); Sound.play("done");
+    update((s) => logSession(s, "blurt", label, set.length, got.length));
   };
   if (!topic) {
     return (
@@ -289,7 +269,7 @@ export function BlurtRun({ ideas, update, onExit, label }) {
     return (
       <RunShell title="What you remembered" onExit={onExit}>
         <div className="stack">
-          <Result big={Math.round(gotN)} of={`of ${set.length} ideas`} bar={(gotN / set.length) * 100}>{out.plain && <p className="caption">The assistant was busy, so this was a quick keyword check. Treat it as a guide.</p>}</Result>
+          <Result big={Math.round(gotN)} of={`of ${set.length} ideas`} bar={(gotN / set.length) * 100}>{out.plain && <p className="caption">This was checked on your device by key words, so treat it as a guide and judge the ones below for yourself.</p>}</Result>
           {out.missed.length > 0 && <section className="stack" style={{ gap: 8 }}><h2 className="eyebrow">You missed</h2>{out.missed.map((n) => <Fix key={n} title={set[n - 1].t} text={set[n - 1].d} />)}</section>}
           {out.partly.length > 0 && <section className="stack" style={{ gap: 8 }}><h2 className="eyebrow">Only partly</h2>{out.partly.map((n) => <Fix key={n} title={set[n - 1].t} text={set[n - 1].d} />)}</section>}
           {out.wrong.length > 0 && <section className="stack" style={{ gap: 8 }}><h2 className="eyebrow">Not quite right</h2>{out.wrong.map((w, i) => <Fix key={i} title={`You wrote: ${w.said}`} text={w.fix} />)}</section>}
@@ -305,17 +285,16 @@ export function BlurtRun({ ideas, update, onExit, label }) {
     <RunShell title="Blurting" sub={`${set.length} ideas in this one. Notes closed, write all you remember.`} onExit={() => { setTopic(null); setText(""); }} exitLabel="Pick another">
       <div className="stack">
         <textarea className="textarea blurt" rows={12} autoFocus aria-label="Everything you remember" value={text} placeholder="Everything you can remember. Don't worry about order or neatness." onChange={(e) => setText(e.target.value)} />
-        <Button variant="primary" size="lg" block disabled={text.trim().length < 20 || busy} onClick={grade}>{busy ? <>Checking what you missed<Dots /></> : "Check what I missed"}</Button>
+        <Button variant="primary" size="lg" block disabled={text.trim().length < 20} onClick={grade}>"Check what I missed"</Button>
       </div>
     </RunShell>
   );
 }
 
 /* Practice quiz and mixed exam. */
-export function QuizRun({ ideas, kind, update, onExit, label }) {
+export function QuizRun({ ideas, practice, kind, update, onExit, label }) {
   const exam = kind === "exam";
   const [len, setLen] = useState(null);
-  const [prog, setProg] = useState("");
   const [items, setItems] = useState(null);
   const [idx, setIdx] = useState(0);
   const [pick, setPick] = useState(null);
@@ -329,7 +308,8 @@ export function QuizRun({ ideas, kind, update, onExit, label }) {
   const go = async (n) => {
     setLen(n);
     const weak = shuffle(ideas).slice(0, Math.min(n, ideas.length));
-    const { items: made } = await buildQuiz(weak, setProg);
+    // each question was written once, when the class's notes were read; an idea without one gets a plain question made here
+    const made = weak.map((i) => mcFor(i, practice, (x) => mcFallback(x, ideas)));
     let list = made;
     if (exam) {
       const cl = shuffle(ideas.filter((i) => i.c && maskIdea(i.d, i.c))).slice(0, Math.max(3, Math.round(n / 3))).map((i) => ({ type: "cloze", ref: [i.id], q: maskIdea(i.d, i.c), a: i.c, w: `${i.t}: ${i.d}` }));
@@ -346,7 +326,7 @@ export function QuizRun({ ideas, kind, update, onExit, label }) {
       </RunShell>
     );
   }
-  if (!items) return <RunShell title={title} onExit={onExit}><p className="muted" role="status" style={{ marginTop: 16 }}>{prog || "Getting ready"}<Dots /></p></RunShell>;
+  if (!items) return <RunShell title={title} onExit={onExit}><p className="muted" role="status" style={{ marginTop: 16 }}>Getting ready<Dots /></p></RunShell>;
   if (idx >= items.length) {
     const right = ans.filter((a) => a.ok).length;
     const wrong = ans.filter((a) => !a.ok);

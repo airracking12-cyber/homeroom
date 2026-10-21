@@ -155,7 +155,7 @@ export function DataProvider({ user, classId, setClassId, classes, setClasses, i
     const task = tasksRef.current.find((t) => t.id === id);
     mutate("tasks", setTasks, (c) => c.filter((x) => x.id !== id));
     Sound.play("rip");
-    if (task) toast("Task deleted", { undo: () => addTask(task) });
+    if (task) toast("Task taken down", { undo: () => addTask(task) });
   }, [mutate, toast, addTask]);
 
   const addGroup = useCallback((g) => mutate("groups", setGroups, (c) => [...c, g]), [mutate]);
@@ -220,7 +220,8 @@ export function DataProvider({ user, classId, setClassId, classes, setClasses, i
   }, [ensureSubject]);
   const materialsRef = useRef(materials); materialsRef.current = materials;
   const topicNames = useCallback((subject) => topicList(materialsRef.current, subject ? [subject] : []).map((x) => x.topic), []);
-  const ingest = useIngest({ user, classRef, saveNote, markInventory, relabel: relabelMaterial, topicNames, toast });
+  const noteInfo = useCallback((id) => materialsRef.current.find((m) => m.id === id), []);
+  const ingest = useIngest({ user, classRef, saveNote, markInventory, relabel: relabelMaterial, topicNames, noteInfo, toast });
   ingestRef.current = ingest;
   const removeMaterial = useCallback(async (id) => {
     const m = materialsRef.current.find((x) => x.id === id);

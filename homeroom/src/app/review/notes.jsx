@@ -260,7 +260,7 @@ export function Library({ tasks, materials, subjects, onAddSubject, removeMateri
           ))}
         </section>
       ) : groups.length === 0 ? (
-        <Empty icon={FileUp} title={scopeMine === "mine" ? "You haven\u2019t added anything yet" : "No notes yet"} action={<Button variant="primary" data-tour="add-notes" onClick={startAdd}>Add the first notes</Button>}>{scopeMine === "mine" ? "Add your notes and your classmates can study from them too." : "Add notes and your class can review from them. Drop a PDF or photo here, or paste text."}</Empty>
+        <Empty icon={FileUp} title={scopeMine === "mine" ? "You haven\u2019t added anything yet" : "The shelf is empty"} action={<Button variant="primary" data-tour="add-notes" onClick={startAdd}>Unpack the first notes</Button>}>{scopeMine === "mine" ? "Add your notes and your classmates can study from them too." : "Add notes and your class can review from them. Drop a PDF or photo here, or paste text."}</Empty>
       ) : (
         <section aria-label="Subjects">
           <h2 className="eyebrow" style={{ marginBottom: 8 }}>Subjects</h2>

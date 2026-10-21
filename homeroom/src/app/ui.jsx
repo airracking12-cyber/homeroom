@@ -50,7 +50,7 @@ export function Banner({ tone, icon, children, action, onClose, role }) {
 
 export function Empty({ icon: Icon, title, children, action }) {
   return (
-    <div className="empty">
+    <div className="empty pop-in">
       {Icon && <span className="glyph"><Icon size={22} aria-hidden="true" /></span>}
       <h2>{title}</h2>
       {children && <p>{children}</p>}
@@ -79,7 +79,6 @@ export function Ring({ pct, size = 72, stroke = 7, children }) {
 }
 
 export const Dots = () => <span className="dots" aria-hidden="true" />;
-export const Spinner = ({ size = 16 }) => <svg className="spin" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" aria-hidden="true"><path d="M12 3a9 9 0 1 0 9 9" strokeLinecap="round" /></svg>;
 
 // A sheet is a native <dialog>: focus is trapped inside, Esc closes it, the page behind is inert, and focus goes back to
 // the button that opened it. It is a bottom sheet on phones and a side panel from 768px.

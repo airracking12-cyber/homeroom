@@ -91,6 +91,7 @@
   /* corkboard and string lights (decoration frames the screen, never sits behind text) */
   --cork: #c9a074; --cork-2: #b68a5d;
   --bulb-a: #f2b45a; --bulb-b: #fff0cf; --wire: #8a7560;
+  --kraft: #c9a56f; --kraft-2: #b48b57; --kraft-3: #8f6a3c; --tape: #ead9b0;   /* the moving box: decoration only */
 
   --scrim: rgba(42, 30, 19, 0.5);
   --shadow-edge: rgba(74, 48, 26, 0.2);
@@ -124,6 +125,7 @@
     --note-1: #e9d58f; --note-2: #bccdab; --note-3: #e2bfae; --on-note: #2a1e13;
     --cork: #8a6a48; --cork-2: #77593b;
     --bulb-a: #ffc873; --bulb-b: #fff0cf; --wire: #9a8670;
+    --kraft: #9a7a4e; --kraft-2: #876840; --kraft-3: #6b5030; --tape: #cdb98c;
     --scrim: rgba(0, 0, 0, 0.6); --shadow-edge: rgba(0, 0, 0, 0.45); --shadow-soft: rgba(0, 0, 0, 0.4);
     --lamp-glow: rgba(255, 190, 110, 0.32); --lamp-glow-strong: rgba(255, 190, 110, 0.55);
   }
@@ -140,6 +142,7 @@
   --note-1: #e9d58f; --note-2: #bccdab; --note-3: #e2bfae; --on-note: #2a1e13;
   --cork: #8a6a48; --cork-2: #77593b;
   --bulb-a: #ffc873; --bulb-b: #fff0cf; --wire: #9a8670;
+  --kraft: #9a7a4e; --kraft-2: #876840; --kraft-3: #6b5030; --tape: #cdb98c;
   --scrim: rgba(0, 0, 0, 0.6); --shadow-edge: rgba(0, 0, 0, 0.45); --shadow-soft: rgba(0, 0, 0, 0.4);
   --lamp-glow: rgba(255, 190, 110, 0.32); --lamp-glow-strong: rgba(255, 190, 110, 0.55);
 }

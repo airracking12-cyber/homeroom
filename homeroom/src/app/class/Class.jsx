@@ -99,7 +99,7 @@ function Groups({ groups, tasks, progress, subjects, defQuarter, onSave, onDelet
         <p className="muted small" style={{ maxWidth: "56ch" }}>A group holds the tasks for one topic in one subject and quarter, like &ldquo;Math Q2: Chapter 4&rdquo;. Everyone in the class sees them.</p>
         <Button variant="primary" onClick={() => open(null)}><Plus size={16} aria-hidden="true" />New group</Button>
       </div>
-      {byQ.length === 0 && <Empty icon={Users} title="No groups yet" action={<Button variant="primary" onClick={() => open(null)}>Make the first group</Button>}>Make one, then pick it when you add a task.</Empty>}
+      {byQ.length === 0 && <Empty icon={Users} title="Nobody has set up a study group yet" action={<Button variant="primary" onClick={() => open(null)}>Make the first group</Button>}>Make one, then pick it when you add a task.</Empty>}
       {byQ.map(([q, list]) => (
         <section key={q} aria-label={`Quarter ${q}`}>
           <h2 className="group-h">Quarter {q}<span className="badge">{list.length}</span></h2>

@@ -37,7 +37,7 @@ export const FEATURE_HOME = {
   "Study techniques": "review", "Weekly plan": "review", "Reviewers": "review", "Weekly reviewer": "review", "Notes and reviewer uploads": "review",
   "Long term plans": "prepare", "Teach me this lessons": "prepare",
   "Seat map and presence": "class", "Temporary chat": "class",
-  "Appearance, sound, music": "settings", "Play introduction": "settings", "Night mode lamp": "global", "Your room home": "room", "Change class": "settings", "Send feedback": "settings",
+  "Appearance, sound, music": "settings", "Replay Move-In Day": "settings", "Night mode lamp": "global", "Your room home": "room", "Change class": "settings", "Send feedback": "settings",
   "Download my data": "settings", "Sign out": "settings", "Delete account": "settings", "About / credit": "settings",
   "Admin: suggestions, classes, Minecraft": "admin",
 };

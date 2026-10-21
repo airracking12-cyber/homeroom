@@ -1,7 +1,7 @@
 // "Your room": the home screen. Each real section of Homeroom is a piece of furniture; the middle of the screen stays calm
 // and readable (every word sits on a solid card), and the decoration frames it at the edges.
 import { Banner, Button } from "../ui.jsx";
-import { Sparkles } from "lucide-react";
+import { Package } from "lucide-react";
 import { useData } from "../data.jsx";
 import { useShell } from "../shell-context.js";
 import { todayISO, diffDays } from "../../lib/dates.js";
@@ -52,9 +52,9 @@ export default function Room() {
 
       <div className="stack">
         {offer?.open && (
-          <Banner tone="accent" icon={Sparkles} onClose={offer.dismiss} action={<Button size="sm" variant="primary" onClick={offer.take}>Take the tour</Button>}>
-            <b>Want a quick tour of your room?</b>
-            <span>It takes about a minute, and you can skip it any time. Nothing you&rsquo;ve saved changes.</span>
+          <Banner tone="accent" icon={Package} onClose={offer.dismiss} action={<Button size="sm" variant="primary" onClick={offer.take}>Start unpacking</Button>}>
+            <b>Want to unbox your room?</b>
+            <span>A one-minute move-in: open the box and put each piece in its place. Skip it any time; nothing you&rsquo;ve saved changes.</span>
           </Banner>
         )}
         <ul role="list" className="room-grid">

@@ -87,7 +87,7 @@ const Action = ({ icon: Icon, title, hint, onClick, danger }) => (
   <button type="button" className="row-btn" onClick={onClick}><Icon size={18} aria-hidden="true" className={danger ? undefined : "muted"} style={danger ? { color: "var(--bad)" } : undefined} /><span className="grow"><span className="title" style={danger ? { color: "var(--bad)" } : undefined}>{title}</span>{hint && <span className="caption" style={{ display: "block" }}>{hint}</span>}</span><ChevronRight size={16} className="muted" aria-hidden="true" /></button>
 );
 
-export default function Settings({ appearance, onSignOut, onChangeClass, onReplayIntro, onDeleted }) {
+export default function Settings({ appearance, onSignOut, onChangeClass, onReplayTour, onDeleted }) {
   const d = useData();
   const toast = useToast();
   const { openHelp } = useShell();
@@ -133,7 +133,7 @@ export default function Settings({ appearance, onSignOut, onChangeClass, onRepla
           {MC_ON && <Action icon={Gamepad2} title="Minecraft server" onClick={() => setSub("minecraft")} />}
         </Group>
         <Group icon={Info} title="Help">
-          <Action icon={Play} title="Take the Move-In Day tour" hint="A one-minute walk around your room" onClick={onReplayIntro} />
+          <Action icon={Play} title="Replay Move-In Day" hint="Unbox your room again, one piece at a time" onClick={onReplayTour} />
           <Action icon={Keyboard} title="Keyboard shortcuts" hint="For laptops and desktops" onClick={openHelp} />
           <Action icon={MessageSquare} title="Send a suggestion or report a problem" onClick={() => setSub("feedback")} />
         </Group>

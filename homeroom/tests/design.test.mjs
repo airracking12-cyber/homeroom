@@ -74,7 +74,7 @@ test("the four reusable animations (unpack, pop-in, stick, glow) and the celebra
   for (const cls of [".unpack", ".pop-in", ".stick", ".glow-layer", ".celebrate"]) assert.ok(css("motion.css").includes(cls), cls);
   // nothing else may define its own entrance: every keyframes name in the app is on this list
   const names = [...ALL.matchAll(/@keyframes\s+([\w-]+)/g)].map((m) => m[1]).sort();
-  assert.deepEqual(names, ["confetti", "fade-in", "glow", "indet", "pop-in", "shake", "shimmer", "spin", "stick", "sync-sweep", "unpack"]);
+  assert.deepEqual(names, ["confetti", "fade-in", "glow", "indet", "pop-in", "shake", "shimmer", "stick", "sync-sweep", "unpack"]);
 });
 
 test("glow is built as an opacity-animated layer, and decoration never takes taps or sits in front of controls", () => {
@@ -168,4 +168,11 @@ test("one icon set: only lucide-react", () => {
     const t = readFileSync(new URL("../src/app/" + f, import.meta.url), "utf8");
     for (const m of t.matchAll(/import[^;]*from "([^"]+)"/g)) assert.ok(!/react-icons|heroicons|fontawesome|phosphor|@tabler/i.test(m[1]), `${f} imports ${m[1]}`);
   }
+});
+
+test("skeletons, not spinners: nothing rotates and loading shows the shape of what is coming", () => {
+  assert.ok(!/\bspin\b/.test(ALL), "no spinner animation or class in the stylesheets");
+  assert.ok(!/export const Spinner/.test(readFileSync(new URL("../src/app/ui.jsx", import.meta.url), "utf8")));
+  assert.ok(!/rotate\(360deg\)/.test(ALL));
+  assert.match(css("components.css"), /\.skel::after \{[^}]*animation: shimmer/);
 });

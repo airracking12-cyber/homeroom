@@ -9,7 +9,7 @@ import { callClaude, streamClaude, parseJSON } from "../../lib/ai.js";
 import { statusLabel } from "../../lib/constants.js";
 import { mmss } from "../../lib/hooks.js";
 import { Sound } from "../../lib/sound.js";
-import { Button, Chip, Segmented, Field, Banner, Dots, Spinner, cx } from "../ui.jsx";
+import { Button, Chip, Segmented, Field, Banner, Dots, cx } from "../ui.jsx";
 
 /* ── one task ── */
 export function TaskRow({ t, status, finished, groupName, onOpen, onToggle, selected }) {
@@ -109,7 +109,7 @@ function QuickAdd({ subjects, onFill }) {
       <div className="quick-body">
         <div className="row-inline">
           <input className="input" aria-label="Describe the task in one sentence" value={q} onChange={(e) => setQ(e.target.value)} placeholder="math quiz friday, chapter 2" onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); go(); } }} />
-          <Button onClick={go} disabled={!q.trim() || busy} aria-label="Fill the form from this sentence">{busy ? <Spinner /> : "Fill in"}</Button>
+          <Button onClick={go} disabled={!q.trim() || busy} aria-label="Fill the form from this sentence">{busy ? <>Reading<Dots /></> : "Fill in"}</Button>
         </div>
         {err && <p className="error" role="alert">{err}</p>}
       </div>

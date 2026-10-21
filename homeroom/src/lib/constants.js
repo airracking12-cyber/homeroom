@@ -26,5 +26,5 @@ export const DEFAULT_SUBJECTS = Object.keys(SUBJ);
 
 export const statusLabel = (s) => (STATUSES.find((x) => x[0] === (s || "todo")) || STATUSES[0])[1];
 
-// The app's own name, used wherever the app introduces itself (the wordmark, the Move-In Day tour).
+// The app's own name, used wherever the app introduces itself (the wordmark, the Move-In Day unboxing).
 export const APP_NAME = "Homeroom";

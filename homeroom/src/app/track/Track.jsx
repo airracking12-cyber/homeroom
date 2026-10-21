@@ -146,11 +146,11 @@ export default function Track() {
         {!d.loading && view === "open" && mode === "list" && (
           sections.length === 0 ? (
             tasks.length === 0 ? (
-              <Empty icon={ListChecks} title="Nothing on the list yet" action={<Button variant="primary" onClick={() => openForm()}><Plus size={16} aria-hidden="true" />Add the first task</Button>}>Add a homework or deadline and your whole class will see it.</Empty>
+              <Empty icon={ListChecks} title="Your corkboard is bare" action={<Button variant="primary" onClick={() => openForm()}><Plus size={16} aria-hidden="true" />Pin the first task</Button>}>Pin a homework or deadline and your whole class will see it, too.</Empty>
             ) : activeFilters > 0 || subj !== "All" ? (
               <Empty icon={SlidersHorizontal} title="Nothing matches these filters" action={<Button onClick={() => setUi((u) => ({ ...u, q: "All", kind: "All", group: "date", subj: "All" }))}>Show everything</Button>}>Try a different subject or clear the filters.</Empty>
             ) : (
-              <Empty icon={CheckCheck} title="You\u2019re all caught up" action={<Button onClick={() => openForm()}><Plus size={16} aria-hidden="true" />Add a task</Button>}>Nothing is waiting for you. Enjoy it, or get ahead in Review.</Empty>
+              <Empty icon={CheckCheck} title="You\u2019re all caught up" action={<Button onClick={() => openForm()}><Plus size={16} aria-hidden="true" />Add a task</Button>}>Nothing is waiting on the corkboard. Enjoy the quiet, or get ahead in Review.</Empty>
             )
           ) : sections.map((g) => (
             <section key={g.key} className="group" aria-label={g.key}>
@@ -174,7 +174,7 @@ export default function Track() {
                 <Bar value={pct} label="Share of tasks done" />
                 <p className="muted small">{scope.length === 0 ? "Nothing has been added yet." : doneList.length === scope.length ? "Every task is done. Nicely finished." : `${scope.length - doneList.length} still to go.`}</p>
               </section>
-              {doneList.length === 0 ? <Empty icon={CheckCheck} title="Nothing finished yet">Tick a task off and it will wait for you here.</Empty> : subjectsDone.map((sj) => {
+              {doneList.length === 0 ? <Empty icon={CheckCheck} title="No finished tasks yet">Tick one off and it lands here, like a note you took down from the board.</Empty> : subjectsDone.map((sj) => {
                 const list = doneList.filter((t) => t.subject === sj);
                 return (
                   <section key={sj} className="group" aria-label={sj}>

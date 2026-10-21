@@ -76,24 +76,66 @@
 .a-paper { fill: var(--raised); stroke: var(--hairline); stroke-width: 1; } .a-accent { fill: var(--accent); } .a-sage { fill: var(--sage); }
 .a-ink { fill: var(--ink); } .a-bulb { fill: var(--bulb-a); }
 
-/* ── Move-In Day: the tour. A dimmed room with one real element lit; the card never covers what it points at ── */
+/* ── Move-In Day: the unboxing. A bare wall and a moving box; then a dimmed room with one real element lit, and a kraft-paper tag
+      that never covers what it points at. Only transform and opacity move. ── */
 .tour { position: fixed; inset: 0; z-index: 90; }
 .tour[hidden] { display: none; }
+.tour-wall { position: fixed; inset: 0; background: var(--canvas); opacity: 0; pointer-events: none; transition: opacity var(--dur-3) var(--ease); }
+.tour-wall[data-up] { opacity: 1; pointer-events: auto; }
 .tour-scrim { position: fixed; background: var(--scrim); animation: fade-in var(--dur-2) var(--ease) both; }
 .tour-ring { position: fixed; border-radius: var(--r-control); border: 3px solid var(--accent); pointer-events: none; }
 .tour-ring::after { content: ""; position: absolute; inset: -8px; border-radius: calc(var(--r-control) + 6px); border: 5px solid var(--lamp-glow-strong); animation: glow 1.4s ease-in-out infinite alternate; }
-.tour-layer { position: fixed; inset: 0; display: flex; justify-content: center; align-items: center; padding: var(--s-4); pointer-events: none; }
+.tour-layer { position: fixed; inset: 0; display: flex; justify-content: center; align-items: center; padding: var(--s-4); pointer-events: none; overflow-y: auto; }
 .tour-layer[data-side="top"] { align-items: flex-start; padding-top: calc(env(safe-area-inset-top, 0px) + var(--s-4)); }
 .tour-layer[data-side="bottom"] { align-items: flex-end; padding-bottom: calc(var(--nav-h) + env(safe-area-inset-bottom, 0px) + var(--s-4)); }
-@media (min-width: 768px) { .tour-layer { padding-left: calc(var(--rail-w) + var(--s-4)); } .tour-layer[data-side="bottom"] { padding-bottom: var(--s-6); } }
-@media (min-width: 1024px) { .tour-layer { padding-left: calc(var(--side-w) + var(--s-4)); } }
-.tour-card {
-  position: relative; pointer-events: auto; width: min(100%, 420px); max-height: 100%; overflow-y: auto; display: grid; gap: var(--s-3);
-  padding: var(--s-5); background: var(--raised); color: var(--body); border: 1px solid var(--hairline); border-radius: var(--r-large); box-shadow: var(--shadow-float);
-}
+@media (min-width: 768px) { .tour-layer:not([data-side="center"]) { padding-left: calc(var(--rail-w) + var(--s-4)); } .tour-layer[data-side="bottom"] { padding-bottom: var(--s-6); } }
+@media (min-width: 1024px) { .tour-layer:not([data-side="center"]) { padding-left: calc(var(--side-w) + var(--s-4)); } }
+
+.tour-card { position: relative; pointer-events: auto; width: min(100%, 420px); max-height: 100%; overflow-y: auto; display: grid; gap: var(--s-3); padding: var(--s-5); background: var(--raised); color: var(--body); border: 1px solid var(--hairline); border-radius: var(--r-large); box-shadow: var(--shadow-float); }
 .tour-card h2 { font-size: var(--fs-h2); outline: none; }
 .tour-credit { color: var(--muted); }
-.tour-dots { display: flex; gap: var(--s-2); }
-.tour-dots i { width: 8px; height: 8px; border-radius: 50%; background: var(--surface-2); border: 1px solid var(--border); }
-.tour-dots i[data-on] { background: var(--accent-fill); border-color: var(--accent-fill); }
+.tour-slots { display: flex; align-items: center; justify-content: space-between; gap: var(--s-3); }
+.tour-slots ol { display: flex; gap: var(--s-2); margin: 0; padding: 0; list-style: none; }
+.tour-slots li { width: 14px; height: 14px; border-radius: 4px; background: var(--surface-2); border: 1px solid var(--border); }
+.tour-slots li[data-done] { background: var(--accent-fill); border-color: var(--accent-fill); }
 .tour-actions { display: flex; flex-wrap: wrap; gap: var(--s-2); align-items: center; }
+
+/* the welcome: no card at all, just the box on a bare wall with its words underneath */
+.tour-card[data-kind="welcome"] { width: min(100%, 440px); overflow: visible; justify-items: center; text-align: center; background: none; border: 0; box-shadow: none; padding: 0; }
+.tour-card[data-kind="welcome"] .tour-slots, .tour-card[data-kind="welcome"] .tour-actions { justify-content: center; }
+.tour-card[data-kind="welcome"] h2 { font-size: var(--fs-display); }
+.tour-card[data-kind="welcome"] p { max-width: 38ch; }
+.tour-scene { width: 100%; padding-top: var(--s-4); border-bottom: 4px solid var(--wood); background: linear-gradient(to bottom, transparent 90%, var(--wood-wash) 90%); }
+.tour-scene .box-art { display: block; width: min(100%, 300px); margin: 0 auto; overflow: visible; }
+
+/* a step: a kraft-paper tag with the piece being unpacked, and what it is for */
+.tag-head { display: grid; grid-template-columns: 76px minmax(0, 1fr); gap: var(--s-4); align-items: center; }
+.tag-text { display: grid; gap: var(--s-1); }
+.tag-art { position: relative; width: 76px; height: 76px; display: grid; place-items: center; background: var(--canvas); border: 1px solid var(--hairline); border-radius: var(--r-control); overflow: hidden; animation: unpack var(--dur-4) var(--ease-settle) both; --uy: 24px; --ux: -16px; --us: 0.8; }
+.tag-art .art { width: 60px; height: 60px; }
+.tag-art .book { transform-box: fill-box; transform-origin: 50% 100%; animation: pop-in var(--dur-3) var(--ease-settle) both; animation-delay: calc(var(--i) * 110ms + 250ms); }
+.tag-note { position: absolute; top: 6px; right: 6px; width: 20px; height: 20px; background: var(--note-1); border-radius: 2px 2px 7px 2px; box-shadow: var(--shadow-note); transform: rotate(var(--tilt, 0deg)); }
+
+/* the box: taped shut, then the flaps swing out, a warm light spills up, and the pieces rise out one by one */
+.a-kraft { fill: var(--kraft); } .a-kraft2 { fill: var(--kraft-2); } .a-kraft3 { fill: var(--kraft-3); } .a-tape { fill: var(--tape); }
+.a-shade { fill: var(--shadow-soft); } .a-light { fill: url(#boxLight); } .a-wireline { stroke: var(--wire); stroke-width: 1.6; } .a-bulb { fill: var(--bulb-a); } .a-bulb-b { fill: var(--bulb-b); }
+.box-label { font-family: var(--font-display); font-size: 25px; fill: var(--ink); font-synthesis: none; }
+.box-sub { font-family: var(--font-body); font-size: 11px; fill: var(--muted); }
+.box-art .flap { transform-box: view-box; transition: transform var(--dur-4) var(--ease-settle); }
+.box-art .flap-l { transform-origin: 44px 112px; } .box-art .flap-r { transform-origin: 236px 112px; }
+.box-art.is-open .flap-l { transform: rotate(-74deg); } .box-art.is-open .flap-r { transform: rotate(74deg); }
+.box-art .tape { transition: opacity var(--dur-2) var(--ease); } .box-art.is-open .tape { opacity: 0; }
+.box-art .box-glow { opacity: 0; transition: opacity var(--dur-4) var(--ease); } .box-art.is-open .box-glow { opacity: 1; }
+.box-art .a-light { animation: glow 3s ease-in-out infinite alternate; }
+.box-art .box-item { opacity: 0; }
+.box-art.is-open .box-item { animation: unpack var(--dur-4) var(--ease-settle) both; animation-delay: calc(var(--i) * 110ms + 260ms); --ux: 0px; --uy: 70px; --us: 0.9; }
+
+/* while the room is bare, what is behind the wall waits; it settles in, piece by piece, as the wall comes down */
+html[data-tour-bare] #root .pop-in, html[data-tour-bare] #root .room-obj, html[data-tour-bare] #root .task { animation-play-state: paused; } /* only the app behind the wall waits, never the tour itself */
+/* the moment you finish moving in, the string lights flare for a few seconds (opacity only) */
+html[data-moved-in] .topbar::after { animation: glow 0.45s ease-in-out 8 alternate; }
+
+/* ── the corkboard fills in: the first tasks settle onto the list one after another (the shared pop-in; reduced motion makes it instant) ── */
+.divided > .task:nth-child(-n + 8) { animation: pop-in var(--dur-3) var(--ease-settle) both; }
+.divided > .task:nth-child(2) { animation-delay: 40ms; } .divided > .task:nth-child(3) { animation-delay: 80ms; } .divided > .task:nth-child(4) { animation-delay: 120ms; }
+.divided > .task:nth-child(5) { animation-delay: 160ms; } .divided > .task:nth-child(6) { animation-delay: 200ms; } .divided > .task:nth-child(7) { animation-delay: 240ms; } .divided > .task:nth-child(8) { animation-delay: 280ms; }

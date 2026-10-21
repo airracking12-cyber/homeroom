@@ -21,3 +21,6 @@ String lights live in the strip reserved at the top of the sticky bar (`--lights
 
 ## Room map (home screen, "your room")
 Track = corkboard and desk. Review = bookshelf (Notes are the shelf, Reviewers the binders, Study the lamp-lit desk). Prepare = wall calendar. Class = the doorway to the hallway. Settings = the dresser. Night mode = the lamp. Ask = your roommate.
+
+## Move-In Day (the first-run introduction)
+An unboxing. A bare wall (the real room waits behind it), a kraft moving box that opens with transform transitions, and five pieces unpacked one per step with the shared `unpack` motion: corkboard (Track), bookshelf (Review), desk lamp (night mode and Ask), your first real notes. Each step lights a real element (a dimmed screen with a glowing ring) and a kraft-paper card that never covers it. The kraft tokens (`--kraft`, `--kraft-2`, `--kraft-3`, `--tape`) are decoration only. It ends with the string lights flaring and your notes on the shelf, never a "done" screen.

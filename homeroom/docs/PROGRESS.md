@@ -23,7 +23,7 @@ src/app/{data.jsx,ui.jsx,nav.js,prefs.js,shell-context.js,router.js,shell.jsx,As
 | --- | --- | --- |
 | Shell | 5 destinations Track/Review/Prepare/Class/Settings, hash router, `g`+letter shortcuts, `?` help, search (Ctrl/Cmd+K, `/`), Ask assistant, offline and unsaved-changes banners, skip link | nav.js, router.js, shell.jsx |
 | Auth | sign-up/in, email confirm, reset, class gate, profile setup, join codes, admin split | App.jsx Root, auth.jsx (skimmed) |
-| Intro | 5 screens: welcome, add real task, paste notes then 3 flashcards, pick Prepare kind, credits. Skip, resume (localStorage `hr:intro:<user>` + account flag `hasCompletedOnboarding`), replay in Settings > Help | intro/Intro.jsx, machine.js, onboarding/flag.js, App.jsx `Signed`/`introOpen` |
+| Move-In Day (replaced the old intro) | unboxing: bare wall, moving box, 5 pieces unpacked, real elements lit, real notes added last; skip/Esc, resume (`hr:tour:<user>` + account flags), one-time offer, replay in Settings | tour/{machine.js,art.jsx,Tour.jsx}, room/Room.jsx offer, onboarding/flag.js |
 | Track | task list/calendar/board, add/edit/delete + Undo, quick-add (AI), draft, comments, status, "N finished", streak, week ring, plan tonight (AI), focus timer, Done view | track/Track.jsx, parts.jsx (skimmed), data.jsx |
 | Review > Study | next-up hero, scope sheet (period, subjects, topics, word search), goal chips, 9 techniques | review/Review.jsx `StudyHub`, lib/study.js `TECHS` |
 | Review techniques | Flashcards (Leitner), Fill blanks, Match, Memory tricks (AI), Teach it back (AI marks), Blurting (AI marks), Practice quiz (AI MC), Mixed exam (timed), Weekly plan | review/runs.jsx, lib/review-ai.js |
@@ -50,40 +50,34 @@ src/app/{data.jsx,ui.jsx,nav.js,prefs.js,shell-context.js,router.js,shell.jsx,As
 ### Limits that shape the build
 AI proxy: 20 calls/min per student (`AI_LIMITER`, 429 + `X-Homeroom-Limit`), 4,096 output tokens, 60s/120s timeouts, 16 MB request. CSP: `font-src 'self' data:`, `script-src 'self'`. No model or Supabase available in my sandbox, so AI paths can only be tested through failure/fallback paths here.
 
-## (c) SPEC status
+## (c) SPEC status: ALL DONE (see the last reply for what was verified)
 
 | Item | Status |
 | --- | --- |
-| A1 to A4 | standing. A1: still to read in full before stage 5: Class.jsx, Prepare.jsx, track/parts.jsx |
-| Stage 1, 3.2, 3.3, 3.7 | done (tokens, fonts, motion, tests) |
-| 1.1 to 1.7 tour, 3.4 room + lamp | done (stage 2) |
-| 2.1 to 2.8 notes reading | DONE (stage 3): one-confirm sheet, raw save first (originals uploaded before any page is read), natural-boundary chunks, per-chunk save, resume after limit/error/cancel/closed app, "Part 3 of 8" + real %, never 100% before the coverage check, cancel keeps finished chunks, retry only the failed chunk, coverage list + one-tap reprocess, 300-idea overflow goes to a new note, >120,000 chars becomes numbered parts, PDFs read 3 pages at a time with pdf-lib, no more 650-word summary |
-| 3.5 motion | keyframes done and used; `stick` (Track tasks) and `celebrate` (session end) to be used in stages 4 and 5 |
-| 3.1, 3.6 | in progress: empty states with personality, roommate microcopy, replace the one `.spin` spinner with a skeleton, sticky-note tasks on Track: stage 5 |
-| 4.2 to 4.7 coach | todo (stage 4) |
-| 2.1, 4.1 | done (findings reported) |
+| A1 to A4 | held. Not read in full (only edited for copy/spinner): Class.jsx, Prepare.jsx, track/parts.jsx |
+| 1.1 to 1.7 Move-In Day | DONE, rebuilt as an unboxing (E2): bare wall, box with credit label, pieces rise out, spotlight on real elements, real notes last, lights flare, Skip/Esc/replay, offer, a11y, reduced motion. Nothing of the old intro remains (test enforces) |
+| 2.1 to 2.8 notes reading | DONE (stage 3): chunked, per-chunk save, resume, real % progress, coverage + reprocess, cancel/retry, 300-idea overflow, numbered parts, PDFs by page group |
+| 3.1 to 3.7 dorm UI | DONE: tokens, Patrick Hand + Inter, motion system (unpack/pop-in/stick/glow + celebrate), room home, lamp, lights, skeletons not spinners, empty states with personality, AA both modes, 44px targets, transform/opacity only |
+| 4.1 to 4.7 coach | DONE: Coach me (active recall, Leitner kept with all history, interleaved weak-first, mixed question types, confidence before reveal, mismatch flags in the moment and summary, misunderstanding + re-test, coaching summary, autosave + resume, celebration) |
+| E1 AI rule | DONE: the assistant only builds the shared database (ideas, topic, practice questions) and writes reviewers; studying calls it 0 times (test + browser check). Reviewers: one per week/task/subject for the class, first come first served (claim records), existing one opened |
 
 ## (d) Key decisions
-- E1 answers: Q1 reviewer = the whole Review tab. Q2 yes, supersede tests; DESIGN.md is ignored as a constraint (replaced by a short dorm design note). Q3 my call: `@fontsource/patrick-hand` (same pattern as the two fonts already shipped). Q4 credit goes at the beginning of the tour (welcome card), plus Settings > About and sign-in. Q5 Room is the default landing, tab bar stays at 5. Q6 add `pdf-lib` and read PDFs page group by page group. Q7 superseded by the AI rule below.
-- E1 AI rule, my reading: inside Notes/Review, AI runs only (1) when building the class's shared database from a note (ideas plus stored practice items: questions, key points, common mistake, memory trick) and (2) when making a reviewer. Study sessions run from stored data with no live AI and no AI grading (key-point checklist plus self-rating instead). Reviewers: one shared class reviewer per scope, first come first served: the first student to ask generates it, everyone else reads the saved one, and a claim record stops duplicate generation.
-- Not covered by the AI rule, left untouched: Assistant, quick-add, Plan tonight, Prepare. (Flagged to the user.)
-- User accepts any dependency or file size ("quality over size"). New dependencies so far: `@fontsource/patrick-hand` (stage 1), `pdf-lib` (stage 3).
-- Reviewer scheduling: keep the existing Leitner boxes (`BOX_DAYS [0,1,2,4,8,16]`, `study.cards[ideaId] = {b, due, s, m}`); extend cards with optional fields only.
-- Notes-reading persistence: raw text is `notes.body` (saved first); per-chunk ideas appended through `save_note_ideas`; private resume record in `kv` as `u:<user>:ingest:<noteId>`. Practice items and shared reviewers go in shared `kv` rows (to be checked against the kv RLS in stage 3). No SQL change planned (A3).
-- Inputs over 120,000 chars: split into numbered parts with a plain notice, never cut silently.
+- Q7 superseded: open answers are checked against stored key points + the student's own rating (no live grading).
+- Several files at once = one note per file, each keeping its original.
+- Leitner kept: new optional card fields x (last confidence), l (last score), w (confident-wrong count), u (unsure-right count).
+- No SQL changes anywhere: shared kv rows hold practice items (`<class>:practice:<note>`), claims (`<class>:claim:...`), private rows hold reading jobs (`u:<user>:ingest`) and the coach session (`u:<user>:session`).
+- Dependencies added: `@fontsource/patrick-hand`, `pdf-lib` (lazy chunk). Removed: `@fontsource-variable/eb-garamond`.
 
 ## (e) Open questions
-- None blocking. For the user to confirm: (1) the AI-rule reading; (2) Q7 superseded (key points + self-rating, no live AI grading); (3) several files added at once now become one note PER FILE, each keeping its own original (before, they were merged and only a single file kept its original).
+- None blocking. Worth confirming: (1) the AI-rule reading; (2) the one-note-per-file change.
 
-## (f) Files changed
-Stage 1 and 2: see the previous zips (tokens/motion/room/tour).
-Stage 3: package.json/lock (+pdf-lib), NEW src/lib/ingest.js, NEW src/lib/ingest-ai.js, NEW src/app/ingest.jsx; src/app/data.jsx (saveNote raw save, addNote starts background reading, `ingest` in context), src/app/review/notes.jsx (AddNotesSheet rewritten, Library shows reading cards), src/app/review/Review.jsx (call sites), src/lib/notes.js (add refuses over-cap instead of cutting), src/lib/study.js (makeChunks in the legacy path, chunkText removed), src/lib/helpers.js (extractFromFile removed), src/styles/screens-review.css; preview/mockSupabase.js (preview notes survive reload); NEW tests/ingest.test.mjs, tests/reading-flow.test.mjs; tests/notes.test.mjs updated.
+## Known limits
+- Older notes with no ideas are still read the old all-or-nothing way when first studied (sentence chunking, not resumable); the new reader handles every note added from now on.
+- Assistant-dependent paths (idea reading, PDF copying, practice questions, reviewers) were verified against a mocked assistant in a browser; run one real PDF and one real note on your deployment.
+- Not tested with a real screen reader.
 
-## Known limits (stage 3)
-- Legacy path: `ensureInventory` (Study start / reviewers for an older note with no ideas) is still all-or-nothing with a local sentence fallback; it now chunks on sentences but is not resumable. Stage 4 routes it through the new reader.
-- Assistant calls and real PDF page reading were tested with a mocked assistant (progress, failure, retry, cancel, resume all verified in a browser); a real-model run needs your live deployment.
-- Resume works on any device for text notes (job in kv + the note text in the database); a file mid-read resumes from its stored original.
+## (f) Files changed (all stages, grouped)
+Tokens/motion/room: styles/{tokens,components,layout,motion,room,screens-*}.css, tests/{design,contrast}.test.mjs, DESIGN.md. Room + lamp: app/{nav.js,shell.jsx,prefs.js,room/*}, App.jsx. Move-In Day: app/tour/*, onboarding/flag.js, settings/Settings.jsx, README.md, tests/{tour,nav}.test.mjs. Reading: lib/{ingest,ingest-ai,notes,helpers,study}.js, app/{ingest.jsx,data.jsx,review/notes.jsx}, tests/{ingest,reading-flow,notes}.test.mjs, preview/mockSupabase.js. Coach: lib/{study-core,practice,practice-store,coach,claims}.js, app/review/{coach.jsx,runs.jsx,Review.jsx}, tests/{practice,coach,claims,coach-wiring}.test.mjs. Deps: package.json/lock.
 
 ## (g) Resume point
-Stage 3 DONE (231 tests pass, lint 0 errors, build ok; reading flow driven in a headless phone browser: failure, coverage, one-chunk reprocess, cancel, continue, reload-resume, pacing wait).
-Next: stage 4, the reviewer as coach (Review tab, SPEC 4.x + AI rule). Plan: (1) FIRST read supabase kv RLS (can class members write `<classId>:*` shared rows?) and review/Review.jsx StudyHub + runs.jsx + lib/study.js useStudy/missCard again; (2) second pass in the reading pipeline stores PRACTICE ITEMS per idea in a shared row (questions: recall, explain, why, apply; key points; common mistake; memory trick) so Study runs with NO live AI; (3) Reviewers: one shared class reviewer per scope, first come first served with a claim record; (4) Leitner stays, extra optional card fields (confidence, last result, mistake note); interleaved weak-first sessions; 3-step confidence before reveal, mismatch flags in the moment and in the summary; wrong answer shows the likely misunderstanding and re-tests it later; coaching summary; session autosave and resume; `celebrate` at the end; route legacy ensureInventory through the new reader.
+All requirements built (263 tests pass, lint 0 errors, build ok). Nothing is mid-file. If you say "continue": run the real-assistant checks above on your deployment, then optional polish ideas: sticky-note styling for Track tasks (the `stick` animation is currently used by the coach tip and the corkboard piece), a lighter legacy path for old notes.

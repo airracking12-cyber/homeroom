@@ -69,3 +69,7 @@ w. yes you may
 7. sure
 
 now go i do not care how big the file size is so it is quality over size here
+
+### E2 (user, after stage 4 was built)
+
+continue (also completely redo the introduction since the one right now from stage 3 is super plain leave NOTHING about the introdction behind and also please remember i want it to feel like new beginings type stuff like unboxing for your dorm)
