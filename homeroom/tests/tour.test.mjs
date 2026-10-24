@@ -1,8 +1,8 @@
-// Move-In Day, the unboxing: its steps, rules and wiring, read from the real source.
+// Move-In Day, the film: its steps, rules and wiring, read from the real source.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync, existsSync, readdirSync } from "node:fs";
-import { STEPS, MAX_STEPS, HANDS_ON, CREDIT, start, reduce, stepOf, ctaFor, unpackedCount, slotStates, loadSaved, save, pickTarget, cardSide, holeFor, tourNeeded, offerNeeded, offerDismissedHere, dismissOfferHere } from "../src/app/tour/machine.js";
+import { STEPS, MAX_STEPS, HANDS_ON, CREDIT, PHASES, PROP_COUNT, OPENING, nextPhase, landsAt, placingLength, sceneLabel, unpackedDuring, start, reduce, stepOf, ctaFor, unpackedCount, slotStates, loadSaved, save, pickTarget, cardSide, holeFor, tourNeeded, offerNeeded, offerDismissedHere, dismissOfferHere } from "../src/app/tour/machine.js";
 import { APP_NAME } from "../src/lib/constants.js";
 
 const read = (p) => readFileSync(new URL("../src/" + p, import.meta.url), "utf8");
@@ -10,6 +10,7 @@ const css = (f) => readFileSync(new URL("../src/styles/" + f, import.meta.url), 
 const memory = () => { const m = new Map(); return { getItem: (k) => (m.has(k) ? m.get(k) : null), setItem: (k, v) => m.set(k, String(v)), removeItem: (k) => m.delete(k), has: (k) => m.has(k) }; };
 const run = (s, ...events) => events.reduce((x, type) => reduce(x, typeof type === "string" ? { type } : type), s);
 const TOUR = read("app/tour/Tour.jsx"), ART = read("app/tour/art.jsx"), ROOMCSS = css("room.css");
+const OPEN = read("app/tour/Opening.jsx"), STAGE = read("app/tour/stage.jsx"), CINEMA = css("cinema.css");
 
 test("at most five steps, opening with a welcome that uses the app's own name from the code", () => {
   assert.ok(STEPS.length >= 1 && STEPS.length <= MAX_STEPS && MAX_STEPS === 5);
@@ -20,22 +21,60 @@ test("at most five steps, opening with a welcome that uses the app's own name fr
 });
 
 test("it is an unboxing: a moving box, a bare room, and one piece of furniture unpacked per step", () => {
-  const words = STEPS.map((s) => s.title + " " + s.body).join(" ").toLowerCase();
+  const words = STEPS.map((s) => s.title + " " + s.body + " " + (s.afterOpen || "")).join(" ").toLowerCase();
   for (const w of ["move-in", "box", "unpack", "corkboard", "bookshelf", "lamp", "shelf"]) assert.ok(words.includes(w), `mentions ${w}`);
   assert.deepEqual(STEPS.map((s) => s.item), ["box", "corkboard", "bookshelf", "lamp", "books"]);
   for (const s of STEPS) assert.ok(s.slot, `${s.id} has a slot name`);
-  assert.match(ART, /export function Box\(\{ open \}\)/); assert.match(ART, /className="flap flap-l"/); assert.match(ART, /className="box-item"/);
-  assert.equal((ART.match(/className="box-item"/g) || []).length, 5, "five things come out of the box");
+  assert.match(STAGE, /function BoxArt\(\)/); assert.match(STAGE, /className="flap flap-l"/); assert.match(STAGE, /className="flap flap-r"/);
+  assert.deepEqual([...STAGE.matchAll(/<Prop name="(\w+)"/g)].map((m) => m[1]).concat("lights").sort(), ["bookshelf", "corkboard", "lamp", "lights", "plant"], "five things come out of the box");
+  assert.equal(PROP_COUNT, 5);
+  assert.match(STAGE, /export const PROPS = Object\.freeze\(\["lights", "corkboard", "bookshelf", "lamp", "plant"\]\)/);
 });
 
-test("the box opens with transforms only, and the pieces rise out with the shared unpack animation", () => {
-  assert.match(ROOMCSS, /\.box-art\.is-open \.flap-l \{ transform: rotate\(-74deg\)/);
-  assert.match(ROOMCSS, /\.box-art\.is-open \.box-item \{ animation: unpack/);
-  assert.match(ROOMCSS, /\.box-art \.flap \{[^}]*transition: transform/);
-  assert.match(ROOMCSS, /\.tag-art \{[^}]*animation: unpack/);
-  assert.match(ROOMCSS, /\.tag-note/); assert.match(TOUR, /className="tag-note stick"/, "the sticky note peels onto the corkboard");
-  assert.match(ROOMCSS, /\.tour-wall \{[^}]*opacity: 0[^}]*transition: opacity/s, "the bare wall fades away");
+test("the opening is a film with a timeline: title card, bare room, tape, light, montage, then the real room", () => {
+  assert.deepEqual(PHASES, ["title", "scene", "ripping", "open", "placing", "ready", "exit"]);
+  assert.deepEqual(["title", "ripping", "open", "placing"].map(nextPhase), ["scene", "open", "placing", "ready"], "the timers hand over by themselves");
+  for (const held of ["scene", "ready", "exit"]) assert.equal(nextPhase(held), held, `${held} waits for the person, or is the end`);
+  assert.ok(landsAt(PROP_COUNT - 1) > landsAt(0) && placingLength() > landsAt(PROP_COUNT - 1), "every piece lands before the room is ready");
+  assert.ok(OPENING.title >= 2500 && OPENING.title <= 5000, "the title card is a beat, not a wait");
+  const total = (OPENING.rip + OPENING.open + placingLength() + OPENING.exit) / 1000;
+  assert.ok(total <= 9, `opening the box to the real room takes ${total}s: it stays short`);
+  assert.deepEqual([0, 1, 3, 5].map((placed) => unpackedDuring(placed, true)), [1, 2, 4, 5]); assert.equal(unpackedDuring(3, false), 0);
+  assert.equal(sceneLabel(0), "Scene 1"); assert.equal(sceneLabel(4), "Scene 5");
+  // every phase has something to play in the CSS, and the camera only ever moves with transform
+  for (const ph of ["ripping", "open", "placing", "ready", "exit"]) assert.ok(CINEMA.includes(`data-phase="${ph}"`), `${ph} is styled`);
+  assert.match(CINEMA, /\.cine-cam \{[^}]*transition: transform[^}]*opacity/s);
+  assert.match(OPEN, /nextPhase\("title"\)/); assert.match(OPEN, /for \(let i = 0; i < PROP_COUNT; i\+\+\) later\(\(\) => \{ setPlaced\(i \+ 1\); Sound\.play\("pop"\)/, "every landing is a sound and a count");
+});
+
+test("the box opens with transforms only, and the pieces fly out of it with transform and opacity", () => {
+  assert.match(CINEMA, /\.cine:is\([^)]*\) \.flap-l \{ transform: rotate\(-74deg\)/);
+  assert.match(CINEMA, /\.flap \{[^}]*transition: transform/);
+  assert.match(CINEMA, /@keyframes prop-fly \{[\s\S]*?\}\n/); assert.match(CINEMA, /\.prop \{ opacity: 0;/);
+  assert.match(CINEMA, /\.cine\[data-phase="ripping"\] \.st-box \{ animation: shake/, "the box shakes as the tape tears (the shared shake)");
+  assert.match(ROOMCSS + CINEMA, /\.tag-art \{[^}]*animation: unpack/);
+  assert.match(CINEMA, /\.tag-note/); assert.match(TOUR, /className="tag-note stick"/, "the sticky note peels onto the corkboard");
+  assert.match(CINEMA, /\.cine\[data-phase="exit"\] \{[^}]*animation: cine-out/, "the film dissolves into the real room");
   const tk = css("tokens.css"); assert.equal((tk.match(/--kraft:/g) || []).length, 3, "kraft paper exists in light, system-dark and forced-dark");
+});
+
+test("the film's colours are tokens, its text is readable on black, and the letterbox is a token", () => {
+  const tk = css("tokens.css");
+  const get = (n) => { const m = tk.match(new RegExp(`--${n}:\\s*(#[0-9a-fA-F]{6})`)); assert.ok(m, `--${n} exists`); return m[1]; };
+  const lum = (h) => { const n = parseInt(h.slice(1), 16); const f = (v) => { v /= 255; return v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4; }; return 0.2126 * f(n >> 16) + 0.7152 * f((n >> 8) & 255) + 0.0722 * f(n & 255); };
+  const ratio = (a, b) => { const [x, y] = [lum(a), lum(b)].sort((p, q) => q - p); return (x + 0.05) / (y + 0.05); };
+  for (const [fg, bg, min, what] of [["cine-text", "cine-0", 4.5, "subtitles"], ["cine-text-2", "cine-0", 4.5, "the credit"], ["cine-warm", "cine-0", 4.5, "the title's second line"], ["cine-text", "cine-wall", 4.5, "text over the wall"]]) assert.ok(ratio(get(fg), get(bg)) >= min, `${what} reads on the film`);
+  assert.match(tk, /--cine-bar: clamp\(/, "the 2.39:1 letterbox is one token"); assert.match(tk, /max-aspect-ratio: 1\/1\) \{\s*:root \{ --cine-bar/, "phones held upright get slim bars");
+  assert.ok(!/#[0-9a-fA-F]{3,6}\b/.test(CINEMA + STAGE + OPEN), "no raw colours in the film");
+});
+
+test("both compositions of the stage exist, so the box and every piece are in frame on any screen", () => {
+  assert.match(STAGE, /export const LAYOUTS = Object\.freeze\(\{\s*wide:/); assert.match(STAGE, /\btall:/);
+  assert.match(STAGE, /preserveAspectRatio="xMidYMid meet"/);
+  assert.match(OPEN, /<Stage layout="wide" \/><Stage layout="tall" \/>/);
+  assert.match(CINEMA, /@media \(max-aspect-ratio: 4\/5\) \{ \.stage-wide \{ display: none; \} \.stage-tall \{ display: block; \} \}/);
+  assert.match(CINEMA, /\.cine \{[^}]*display: grid; grid-template-rows: minmax\(0, 1fr\) auto/, "the stage and the subtitles never overlap");
+  for (const prop of ["corkboard", "bookshelf", "lamp", "plant"]) for (const name of ["wide", "tall"]) assert.ok(new RegExp(`${name}: \\{[\\s\\S]*?${prop}: \\{ c: \\[`).test(STAGE), `${prop} has a place in ${name}`);
 });
 
 test("the room is bare behind the wall and furnishes itself as the wall comes down", () => {
@@ -43,11 +82,12 @@ test("the room is bare behind the wall and furnishes itself as the wall comes do
   assert.match(ROOMCSS, /html\[data-tour-bare\] #root \.pop-in, html\[data-tour-bare\] #root \.room-obj[^{]*\{ animation-play-state: paused; \}/);
 });
 
-test("Nathaniel's credit is at the very beginning: on the box and under it, and still in Settings and sign-in", () => {
+test("Nathaniel's credit is at the very beginning: on the title card, on the box and under it, and still in Settings and sign-in", () => {
   assert.equal(CREDIT.name, "Nathaniel Visaya");
   assert.match(CREDIT.welcome, /Nathaniel Visaya/);
-  assert.match(TOUR, /welcome && <p className="caption tour-credit">\{CREDIT\.welcome\}/);
-  assert.match(ART, /From: Nathaniel Visaya/);
+  assert.match(OPEN, /<p className="caption tour-credit cine-credit">\{CREDIT\.welcome\}<\/p>/);
+  assert.match(OPEN, /\{CREDIT\.name\} presents/, "the title card opens with his name");
+  assert.match(STAGE, /From: Nathaniel Visaya/);
   assert.match(read("app/settings/Settings.jsx"), /Nathaniel Visaya/);
   assert.match(read("app/auth.jsx"), /Made by Nathaniel Visaya/);
 });
@@ -66,11 +106,15 @@ test("every step after the welcome points at a real element, with a fallback, an
 
 test("the welcome has two beats (open the box, then start unpacking) and the count follows the unpacking", () => {
   assert.equal(ctaFor(STEPS[0], false), "Open the box"); assert.equal(ctaFor(STEPS[0], true), "Start unpacking"); assert.equal(ctaFor(STEPS[1], false), "Next");
-  assert.match(TOUR, /if \(welcome && !opened\) \{ setOpened\(true\); return; \}/);
+  assert.match(OPEN, /if \(phase === "scene"\) setPhase\("ripping"\)/, "the first press opens the box");
+  assert.match(OPEN, /boxOpen && phase !== "exit"\) setPhase\("exit"\)/, "the second press starts unpacking");
+  assert.match(OPEN, /const label = phase === "scene" \? step\.cta : step\.ctaOpen/);
+  assert.ok(STEPS[0].afterOpen && STEPS[0].afterOpen.split(/\s+/).length <= 20, "what is said once the box is open");
   assert.deepEqual([0, 1, 2, 3, 4].map((i) => unpackedCount(i, false)), [0, 2, 3, 4, 5]);
   assert.equal(unpackedCount(0, true), 1);
   assert.deepEqual(slotStates(2, true).map((s) => s.done), [true, true, true, false, false]);
-  assert.match(TOUR, /Unpacked \{unpackedCount\(st\.step, opened\)\} of \{STEPS\.length\}/);
+  assert.match(TOUR, /Unpacked \{unpackedCount\(st\.step, true\)\} of \{STEPS\.length\}/);
+  assert.match(OPEN, /Unpacked \{count\} of \{PROP_COUNT\}/);
 });
 
 test("the last step has the student add real notes, and it ends with them on the shelf, not a 'done' screen", () => {
@@ -130,14 +174,18 @@ test("skipping or finishing never alters anything: the tour only records that it
 
 test("keyboard and screen-reader friendly: focus moves to each step, Esc skips, the page behind is inert, reduced motion is respected", () => {
   assert.match(TOUR, /role="dialog"/); assert.match(TOUR, /aria-labelledby="tour-h"/); assert.match(TOUR, /aria-describedby="tour-b"/);
-  assert.match(TOUR, /id="tour-h" ref=\{headRef\} tabIndex=\{-1\}/); assert.match(TOUR, /headRef\.current\?\.focus\(/);
+  assert.match(OPEN, /role="dialog" aria-modal="true" aria-labelledby="tour-h" aria-describedby="tour-b"/, "the opening is a dialog too");
+  assert.match(TOUR, /id="tour-h" ref=\{headRef\} tabIndex=\{-1\}/); assert.match(OPEN, /id="tour-h" ref=\{headRef\} tabIndex=\{-1\}/); assert.match(TOUR, /headRef\.current\?\.focus\(/);
   assert.match(TOUR, /e\.key === "Escape"[^}]*dispatch\(\{ type: "SKIP" \}\)/);
   assert.match(TOUR, /root\.inert = st\.open && !covered && !step\.handsOn/); assert.match(TOUR, /createPortal/);
-  assert.match(TOUR, /role="status">\{welcome && opened \? "The box is open\." : ""\}/, "opening the box is announced");
-  for (const a of ["tour-scene\" aria-hidden=\"true\"", "tag-art\" aria-hidden=\"true\""]) assert.ok(TOUR.includes(a), `${a} is decoration`);
-  assert.match(ART, /aria-hidden="true" focusable="false"/);
-  assert.match(TOUR, /className=\{cx\("tour-card pop-in"/, "the entrance is the shared pop-in, which becomes a plain fade under reduced motion");
-  assert.match(ROOMCSS, /\.tour-ring::after \{[^}]*animation: glow/);
+  assert.match(OPEN, /role="status">\{announce\}/); assert.match(OPEN, /"The box is open\."/, "opening the box is announced");
+  for (const a of ['className="cine-cam" aria-hidden="true"', 'className="cine-vignette" aria-hidden="true"', 'tag-art" ref={artRef} aria-hidden="true"', 'className="tour-cut" aria-hidden="true"', 'className="tour-fly" aria-hidden="true"']) assert.ok((OPEN + TOUR).includes(a.replace("className=", "").replace(/^"/, "")) || (OPEN + TOUR).includes(a), `${a} is decoration`);
+  assert.match(STAGE, /aria-hidden="true" focusable="false"/);
+  assert.match(TOUR, /className=\{cx\("tour-card pop-in"\)\}/, "the entrance is the shared pop-in, which becomes a plain fade under reduced motion");
+  assert.match(CINEMA, /\.tour-ring::after \{[^}]*animation: glow/);
+  assert.match(OPEN, /useMedia\("\(prefers-reduced-motion: reduce\)"\)/, "with reduced motion the film skips its title card and runs in a fifth of the time");
+  assert.match(OPEN, /Skip tour/, "the film can be skipped from its first frame");
+  assert.match(CINEMA, /\.cine :focus-visible \{ outline-color: var\(--cine-warm\)/, "focus is visible on black");
 });
 
 test("it is skippable at any time and replayable from the menu (Settings), and each skip works from every step", () => {

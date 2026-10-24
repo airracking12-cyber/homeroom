@@ -1,7 +1,7 @@
 // The frame around the signed-in app: top bar, navigation (tab bar, rail or sidebar by screen size), and the sheets every
 // destination shares (add a task, search, ask, shortcuts).
 import { useState, useEffect, useMemo, useCallback, useRef } from "react";
-import { ListChecks, BookOpen, Telescope, Users, Settings as SettingsIcon, Search, MessageCircle, WifiOff, Keyboard, RefreshCw, LampDesk } from "lucide-react";
+import { House, ListChecks, BookOpen, Telescope, Users, Settings as SettingsIcon, Search, MessageCircle, WifiOff, Keyboard, RefreshCw, LampDesk } from "lucide-react";
 import { useData } from "./data.jsx";
 import { ShellCtx } from "./shell-context.js";
 import { DESTINATIONS, ROOM, shortcutDest } from "./nav.js";
@@ -20,7 +20,7 @@ import { TaskForm } from "./track/parts.jsx";
 import { useSearchHits } from "./track/parts.jsx";
 import Assistant from "./Assistant.jsx";
 
-const ICONS = { track: ListChecks, review: BookOpen, prepare: Telescope, class: Users, settings: SettingsIcon };
+const ICONS = { room: House, track: ListChecks, review: BookOpen, prepare: Telescope, class: Users, settings: SettingsIcon };
 const mac = typeof navigator !== "undefined" && /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent || "");
 
 export function SearchPanel({ tasks, materials, onTask, onMaterial }) {
@@ -157,7 +157,7 @@ export default function Shell({ route, go, back, children, appearance, tour, off
         {d.syncing && <div className="sync" role="progressbar" aria-label="Syncing" />}
         <nav className="nav" aria-label="Main">
           <div className="nav-brand"><a className="home-link" href="#/room" title="Your room" onClick={(e) => { e.preventDefault(); go("room"); }}><Wordmark /></a></div>
-          {DESTINATIONS.map((x) => {
+          {[ROOM, ...DESTINATIONS].map((x) => {
             const Icon = ICONS[x.id];
             return (
               <a key={x.id} className="nav-item" data-tour={`nav-${x.id}`} href={`#/${x.id}`} aria-current={route.dest === x.id ? "page" : undefined} onClick={(e) => { e.preventDefault(); go(x.id); }}>

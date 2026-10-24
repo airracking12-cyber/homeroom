@@ -1,0 +1,204 @@
+/* Move-In Day, the film. Tokens only (the --cine-* set in tokens.css). Only transform and opacity ever move; there is no filter or blur.
+   Scene 1 (.cine) is a night scene on its own black stage: a bare room, a moving box, a title card, subtitles, letterbox bars.
+   Scenes 2 to 5 (.tour-*) happen over the real app: a clapperboard slate, a title that cuts in, a spotlight, a piece in flight.
+   Everything here is switched by `data-phase` on .cine (see Opening.jsx); reduced motion collapses every animation to its end state. */
+
+.tour { position: fixed; inset: 0; z-index: 90; }
+.tour[hidden] { display: none; }
+
+/* the colours of the furniture drawn on the stage and on the slate (the box, the string lights) */
+.a-kraft { fill: var(--kraft); } .a-kraft2 { fill: var(--kraft-2); } .a-kraft3 { fill: var(--kraft-3); } .a-tape { fill: var(--tape); }
+.a-shade { fill: var(--cine-0); opacity: 0.45; } .a-bulb-b { fill: var(--bulb-b); } .a-wireline { stroke: var(--wire); stroke-width: 1.6; }
+.box-label { font-family: var(--font-display); font-size: 25px; fill: var(--ink); font-synthesis: none; }
+.box-sub { font-family: var(--font-body); font-size: 11px; fill: var(--muted); }
+
+/* ───────────── scene 1: the opening shot ───────────── */
+.cine { position: fixed; inset: 0; overflow: hidden; isolation: isolate; display: grid; grid-template-rows: minmax(0, 1fr) auto; background: var(--cine-0); color: var(--cine-text); }
+.cine :focus-visible { outline-color: var(--cine-warm); }
+.cine .btn-ghost, .cine .btn-secondary { color: var(--cine-text); }
+@media (hover: hover) { .cine .btn-ghost:hover:not(:disabled) { background: var(--cine-dim); } }
+.cine .btn-ghost:active:not(:disabled) { background: var(--cine-dim); }
+
+/* the camera: it pushes in on the box while the tape tears, pulls back to show the room filling up, and dives into the light at the end */
+.cine-cam { position: relative; grid-row: 1; grid-column: 1; min-height: 0; transform-origin: 50% 70%; transition: transform 1500ms var(--ease), opacity 1500ms var(--ease); }
+.cine[data-phase="title"] .cine-cam { opacity: 0; }
+.cine[data-phase="ripping"] .cine-cam { transform: scale(1.12); }
+.cine[data-phase="open"] .cine-cam { transform: scale(1.2); }
+.cine[data-phase="exit"] .cine-cam { transform: scale(1.7); transition-duration: 1000ms; }
+.cine[data-phase="scene"] .cine-cam { cursor: pointer; }
+.cine-drift { position: absolute; inset: 0; }
+
+.stage { position: absolute; inset: 0; width: 100%; height: 100%; max-width: none; display: block; }
+.stage-tall { display: none; }
+@media (max-aspect-ratio: 4/5) { .stage-wide { display: none; } .stage-tall { display: block; } }
+.st-wall { fill: var(--cine-wall); } .st-floor { fill: var(--cine-floor); } .st-base { fill: var(--cine-wall-2); } .st-plank { fill: var(--cine-floor-2); }
+.st-moon { fill: var(--cine-moon); } .st-star { fill: var(--cine-text); opacity: 0.8; }
+.st-wire { stroke: var(--wire); stroke-width: 1.6; }
+.st-shaft { opacity: 1; transition: opacity 1600ms var(--ease); }
+.cine[data-phase="open"] .st-shaft { opacity: 0.5; }
+.cine[data-phase="placing"] .st-shaft { opacity: 0.3; } .cine[data-phase="ready"] .st-shaft, .cine[data-phase="exit"] .st-shaft { opacity: 0.2; }
+.st-halos { opacity: 0; } .st-halo { fill: var(--cine-glow); } .st-lamplight { opacity: 0; }
+.st-beam { fill: url(#boxBeam); } .st-bloom { fill: url(#boxLight); transform-box: fill-box; transform-origin: 50% 50%; transform: scale(0.35); transition: transform 1300ms var(--ease); }
+
+/* dust in the moonlight */
+.cine-motes { position: absolute; inset: 0; pointer-events: none; }
+.cine-motes i { position: absolute; width: var(--sz); height: var(--sz); border-radius: 50%; background: var(--cine-moon); opacity: 0; animation: mote var(--d) ease-in-out infinite; animation-delay: calc(var(--k) * -0.9s); }
+@keyframes mote { 0% { opacity: 0; transform: translate(0, 0); } 30% { opacity: 0.75; } 70% { opacity: 0.45; } 100% { opacity: 0; transform: translate(22px, 46px); } }
+
+/* the room warms with every piece that lands */
+.cine-warm { position: absolute; inset: 0; pointer-events: none; opacity: 0; transition: opacity 1000ms var(--ease); background: radial-gradient(ellipse at 50% 85%, var(--cine-glow), transparent 70%); }
+.cine[data-phase="open"] .cine-warm { opacity: 0.3; }
+.cine[data-phase="placing"] .cine-warm, .cine[data-phase="ready"] .cine-warm, .cine[data-phase="exit"] .cine-warm { opacity: calc(0.3 + var(--placed, 0) * 0.1); }
+.cine-vignette { position: absolute; inset: 0; z-index: 2; pointer-events: none; background: radial-gradient(ellipse at 50% 48%, transparent 38%, var(--cine-vignette) 100%); }
+
+/* the box: it shakes as the tape tears, then the flaps swing out and the light spills up */
+.st-box { transform-box: view-box; }
+.flap { transform-box: view-box; transition: transform 1000ms var(--ease-settle); }
+.flap-l { transform-origin: 44px 112px; } .flap-r { transform-origin: 236px 112px; }
+.box-light { opacity: 0; transition: opacity 900ms var(--ease); }
+.tape-wrap { transform-box: fill-box; transform-origin: 0% 100%; }
+.cine[data-phase="ripping"] .st-box { animation: shake 0.42s linear 2; }
+.cine[data-phase="ripping"] .tape-wrap, .cine[data-phase="open"] .tape-wrap, .cine[data-phase="placing"] .tape-wrap, .cine[data-phase="ready"] .tape-wrap, .cine[data-phase="exit"] .tape-wrap { animation: tape-rip 1000ms var(--ease) both; }
+@keyframes tape-rip { 0% { transform: none; opacity: 1; } 28% { transform: translate(2px, -6px) rotate(-4deg); opacity: 1; } 100% { transform: translate(90px, -120px) rotate(52deg); opacity: 0; } }
+.cine:is([data-phase="open"], [data-phase="placing"], [data-phase="ready"], [data-phase="exit"]) .flap-l { transform: rotate(-74deg); }
+.cine:is([data-phase="open"], [data-phase="placing"], [data-phase="ready"], [data-phase="exit"]) .flap-r { transform: rotate(74deg); }
+.cine:is([data-phase="open"], [data-phase="placing"], [data-phase="ready"], [data-phase="exit"]) .box-light { opacity: 1; }
+.cine:is([data-phase="open"], [data-phase="placing"], [data-phase="ready"], [data-phase="exit"]) .st-bloom { transform: scale(1); }
+
+/* the pieces: each is drawn where it ends up, and flies there out of the box (--dx, --dy lead back to the box) */
+.prop { opacity: 0; transform-box: fill-box; transform-origin: 50% 50%; }
+.prop-strand { transform-box: view-box; transform-origin: 0 0; }
+.cine:is([data-phase="placing"], [data-phase="ready"], [data-phase="exit"]) .prop { animation: prop-fly 1050ms var(--ease) both; animation-delay: calc(var(--i) * 620ms); }
+.cine:is([data-phase="placing"], [data-phase="ready"], [data-phase="exit"]) .prop-strand { animation: strand-in 1100ms var(--ease) both; animation-delay: 0ms; }
+@keyframes prop-fly {
+  0%   { opacity: 0; transform: translate(var(--dx), var(--dy)) scale(0.3) rotate(-14deg); }
+  16%  { opacity: 1; }
+  42%  { opacity: 1; transform: translate(calc(var(--dx) * 0.9), calc(var(--dy) * 0.9 - 90px)) scale(1.12) rotate(5deg); }
+  86%  { opacity: 1; transform: translate(0, 0) scale(1.07) rotate(-1deg); }
+  100% { opacity: 1; transform: none; }
+}
+@keyframes strand-in { 0% { opacity: 0; transform: scaleX(0.04); } 20% { opacity: 1; } 100% { opacity: 1; transform: none; } }
+.cine:is([data-phase="placing"], [data-phase="ready"], [data-phase="exit"]) .st-halos { animation: fade-in 1100ms var(--ease) 1300ms both; }
+.cine:is([data-phase="placing"], [data-phase="ready"], [data-phase="exit"]) .st-lamplight { animation: fade-in 1300ms var(--ease) calc(3 * 620ms + 900ms) both; }
+
+/* the title card: the very first thing, and the credit */
+.cine-title { position: absolute; inset: 0; z-index: 6; display: grid; place-content: center; justify-items: center; gap: var(--s-3); padding: var(--s-6); background: var(--cine-0); color: var(--cine-text); text-align: center; cursor: pointer; }
+.cine-title > span { animation: title-line 900ms var(--ease) both, title-away 700ms var(--ease) 3000ms both; }
+.cine-title .eyebrow { color: var(--cine-text-2); font-size: var(--fs-small); letter-spacing: 0.14em; animation-delay: 400ms, 3000ms; }
+.cine-name { font-family: var(--font-display); font-synthesis: none; font-size: clamp(56px, 12vw, 128px); line-height: 1; color: var(--cine-text); letter-spacing: 0.01em; display: inline-flex; align-items: baseline; animation-delay: 1200ms, 3000ms; }
+.cine-name i { width: 0.14em; height: 0.14em; border-radius: 50%; background: var(--accent); margin-left: 0.06em; display: inline-block; }
+.cine-tag { font-family: var(--font-display); font-synthesis: none; font-size: clamp(22px, 3.4vw, 34px); color: var(--cine-warm); animation-delay: 2200ms, 3000ms; }
+@keyframes title-line { from { opacity: 0; transform: translateY(14px); } to { opacity: 1; transform: none; } }
+@keyframes title-away { from { opacity: 1; } to { opacity: 0; } }
+
+/* letterbox bars, and the skip button that lives in the top one */
+.cine-bar { position: absolute; left: 0; right: 0; height: var(--cine-bar); background: var(--cine-0); z-index: 4; animation: bar-in 1300ms var(--ease) 150ms both; }
+.cine-bar-t { top: 0; --from: -100%; } .cine-bar-b { bottom: 0; --from: 100%; }
+@keyframes bar-in { from { transform: translateY(var(--from)); } to { transform: none; } }
+.cine-top { position: absolute; z-index: 8; top: env(safe-area-inset-top, 0px); right: var(--gutter); height: var(--cine-bar); display: flex; align-items: center; }
+
+/* the subtitles: a pool of darkness at the foot of the frame, with the words and the one button */
+.cine-lower { position: relative; z-index: 5; grid-row: 2; grid-column: 1; display: grid; justify-items: center; gap: var(--s-2); margin-top: calc(var(--s-8) * -1); padding: var(--s-8) var(--gutter) calc(var(--cine-bar) + var(--s-3)); text-align: center; background: linear-gradient(to bottom, transparent, var(--cine-0) 40%); }
+.cine[data-phase="title"] .cine-lower { opacity: 0; pointer-events: none; }
+.cine-lower > * { max-width: 62ch; }
+.cine-lower h2:focus-visible { outline: none; }
+.cine-credit { transition: opacity 600ms var(--ease); }
+.cine:not([data-phase="scene"]):not([data-phase="title"]) .cine-credit { opacity: 0 !important; animation: none; }
+.cine .eyebrow { color: var(--cine-text-2); }
+.cine-lower h2 { color: var(--cine-text); font-size: clamp(26px, 3vw, 36px); }
+.cine-sub { color: var(--cine-text); font-size: 17px; line-height: 1.45; min-height: calc(2 * 1.45em); }
+.cine-lower .tour-credit { color: var(--cine-text-2); font-size: var(--fs-caption); max-width: 74ch; }
+.cine-foot { display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: var(--s-4); margin-top: var(--s-2); max-width: none; }
+.cine:not([data-phase="title"]) .cine-eyebrow { animation: sub-in 900ms var(--ease) 500ms both; }
+.cine:not([data-phase="title"]) .cine-lower h2 { animation: sub-in 900ms var(--ease) 800ms both; }
+.cine:not([data-phase="title"]) .cine-sub { animation: sub-in 900ms var(--ease) 1200ms both; }
+.cine:not([data-phase="title"]) .cine-credit { animation: sub-in 900ms var(--ease) 2200ms both; }
+.cine:not([data-phase="title"]) .cine-strip { animation: sub-in 900ms var(--ease) 2600ms both; }
+.cine:not([data-phase="title"]) .cine-cta { animation: sub-in 700ms var(--ease) 2800ms both; }
+.cine:is([data-phase="open"], [data-phase="placing"], [data-phase="ready"]) .cine-sub { animation-delay: 150ms; }
+.cine:is([data-phase="open"], [data-phase="placing"], [data-phase="ready"]) .cine-cta { animation-delay: 300ms; }
+@keyframes sub-in { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
+.cine-cta { box-shadow: none; }
+
+/* the light at the end: it fills the frame, then the film dissolves and the real room is behind it */
+.cine-flash { position: absolute; z-index: 7; left: 50%; top: 60%; width: 90vmax; height: 90vmax; margin: -45vmax 0 0 -45vmax; border-radius: 50%; opacity: 0; transform: scale(0.04); pointer-events: none; background: radial-gradient(closest-side, var(--cine-warm-2), var(--cine-warm) 42%, transparent 100%); }
+.cine[data-phase="exit"] .cine-flash { animation: flash-bloom 950ms var(--ease) both; }
+@keyframes flash-bloom { 0% { opacity: 0; transform: scale(0.04); } 38% { opacity: 1; transform: scale(0.8); } 100% { opacity: 1; transform: scale(1.4); } }
+.cine[data-phase="exit"] { pointer-events: none; animation: cine-out 700ms var(--ease) 300ms both; }
+@keyframes cine-out { from { opacity: 1; } to { opacity: 0; } }
+
+/* a phone on its side is short: only the subtitle and the button */
+@media (max-height: 480px) and (orientation: landscape) {
+  .cine-lower { gap: var(--s-1); }
+  .cine-lower h2, .cine-eyebrow, .cine-credit { display: none; }
+  .cine-sub { font-size: var(--fs-small); }
+}
+
+/* ───────────── scenes 2 to 5: over the real app ───────────── */
+.tour-scrim { position: fixed; background: var(--scrim); animation: fade-in var(--dur-3) var(--ease) both; }
+.tour-ring { position: fixed; border-radius: var(--r-control); border: 3px solid var(--accent); pointer-events: none; animation: ring-in 600ms var(--ease-settle) 800ms both; }
+.tour-ring::after { content: ""; position: absolute; inset: -8px; border-radius: calc(var(--r-control) + 6px); border: 5px solid var(--lamp-glow-strong); animation: glow 1.4s ease-in-out infinite alternate; }
+.tour-ring::before { content: ""; position: absolute; inset: -3px; border-radius: inherit; border: 3px solid var(--cine-warm); opacity: 0; }
+.tour-ring[data-landed]::before { animation: ring-hit 800ms var(--ease) both; }
+@keyframes ring-in { from { opacity: 0; transform: scale(1.12); } to { opacity: 1; transform: none; } }
+@keyframes ring-hit { from { opacity: 0.95; transform: scale(1); } to { opacity: 0; transform: scale(1.4); } }
+
+.tour-layer { position: fixed; inset: 0; display: flex; justify-content: center; align-items: center; padding: var(--s-4); pointer-events: none; overflow-y: auto; }
+.tour-layer[data-side="top"] { align-items: flex-start; padding-top: calc(env(safe-area-inset-top, 0px) + var(--s-4)); }
+.tour-layer[data-side="bottom"] { align-items: flex-end; padding-bottom: calc(var(--nav-h) + env(safe-area-inset-bottom, 0px) + var(--s-4)); }
+@media (min-width: 768px) { .tour-layer:not([data-side="center"]) { padding-left: calc(var(--rail-w) + var(--s-4)); } .tour-layer[data-side="bottom"] { padding-bottom: var(--s-6); } }
+@media (min-width: 1024px) { .tour-layer:not([data-side="center"]) { padding-left: calc(var(--side-w) + var(--s-4)); } }
+
+.tour-card { position: relative; pointer-events: auto; width: min(100%, 440px); max-height: 100%; overflow-y: auto; display: grid; gap: var(--s-3); padding: var(--s-5); padding-top: 0; background: var(--raised); color: var(--body); border: 1px solid var(--hairline); border-radius: var(--r-large); box-shadow: var(--shadow-float); }
+.tour-card.pop-in { animation-delay: 820ms; }
+.tour-card h2 { font-size: var(--fs-h2); outline: none; }
+.tour-credit { color: var(--muted); }
+
+/* the clapperboard slate across the top of every card: the stick claps shut as the scene begins */
+.slate { position: relative; height: 44px; margin: 0 calc(var(--s-5) * -1) var(--s-1); }
+.slate-arm { position: absolute; left: 0; right: 0; top: 0; height: 14px; transform-origin: 0 100%; background: repeating-linear-gradient(-45deg, var(--ink) 0 12px, var(--raised) 12px 24px); animation: clap 560ms var(--ease-settle) 1100ms both; }
+.slate-board { position: absolute; left: 0; right: 0; top: 14px; bottom: 0; display: flex; align-items: center; gap: var(--s-4); padding: 0 var(--s-5); background: var(--ink); color: var(--raised); font-size: var(--fs-caption); font-weight: 600; }
+.slate-board b { color: var(--raised); font-weight: 700; }
+.slate-board span:last-child { margin-left: auto; }
+@keyframes clap { 0% { transform: rotate(-17deg); } 60% { transform: rotate(1.5deg); } 100% { transform: none; } }
+
+.tour-slots { display: flex; align-items: center; justify-content: space-between; gap: var(--s-3); }
+.tour-actions { display: flex; flex-wrap: wrap; gap: var(--s-2); align-items: center; }
+
+/* the film strip: one frame per piece, filled as each is unpacked (on the card, and under the subtitles) */
+.tour-slots ol, .cine-strip ol { display: flex; gap: 3px; margin: 0; padding: 6px 5px; list-style: none; border-radius: 4px; }
+.tour-slots li, .cine-strip li { width: 15px; height: 20px; border-radius: 2px; }
+.tour-slots ol { background: var(--ink); } .tour-slots li { background: var(--seg-on); opacity: 0.45; } .tour-slots li[data-done] { background: var(--accent); opacity: 1; }
+.cine-strip { display: flex; align-items: center; gap: var(--s-3); }
+.cine-strip ol { background: var(--cine-wall); } .cine-strip li { background: var(--cine-0); } .cine-strip li[data-done] { background: var(--cine-warm); }
+.cine-strip .caption { color: var(--cine-text-2); }
+
+/* a card: the piece being put in place, and what it is for */
+.tag-head { display: grid; grid-template-columns: 76px minmax(0, 1fr); gap: var(--s-4); align-items: center; }
+.tag-text { display: grid; gap: var(--s-1); }
+.tag-art { position: relative; width: 76px; height: 76px; display: grid; place-items: center; background: var(--canvas); border: 1px solid var(--hairline); border-radius: var(--r-control); overflow: hidden; animation: unpack var(--dur-4) var(--ease-settle) 1000ms both; --uy: 24px; --ux: -16px; --us: 0.8; }
+.tag-art .art { width: 60px; height: 60px; }
+.tag-art .book { transform-box: fill-box; transform-origin: 50% 100%; animation: pop-in var(--dur-3) var(--ease-settle) both; animation-delay: calc(var(--i) * 110ms + 1250ms); }
+.tag-note { position: absolute; top: 6px; right: 6px; width: 20px; height: 20px; background: var(--note-1); border-radius: 2px 2px 7px 2px; box-shadow: var(--shadow-note); transform: rotate(var(--tilt, 0deg)); }
+
+/* the title that cuts in at the start of a scene: two curtains of black part to show the scene */
+.tour-cut { position: fixed; inset: 0; z-index: 5; display: grid; place-content: center; justify-items: center; gap: var(--s-2); text-align: center; pointer-events: none; color: var(--cine-text); }
+.tour-cut::before, .tour-cut::after { content: ""; position: absolute; left: 0; right: 0; height: 50.5%; background: var(--cine-0); animation: curtain 760ms var(--ease) 640ms both; }
+.tour-cut::before { top: 0; --to: -101%; } .tour-cut::after { bottom: 0; --to: 101%; }
+.tour-cut > * { position: relative; z-index: 1; animation: cut-text 1200ms var(--ease) 60ms both; }
+.tour-cut .eyebrow { color: var(--cine-text-2); }
+.tour-cut-title { font-family: var(--font-display); font-synthesis: none; font-size: clamp(40px, 8vw, 72px); line-height: 1.05; }
+@keyframes curtain { to { transform: translateY(var(--to)); } }
+@keyframes cut-text { 0% { opacity: 0; transform: translateY(12px); } 24% { opacity: 1; transform: none; } 58% { opacity: 1; } 100% { opacity: 0; } }
+
+/* the piece itself, flying from the card to the spot it lights up */
+.tour-fly { position: fixed; left: 0; top: 0; z-index: 6; width: 56px; height: 56px; pointer-events: none; animation: fly-to 900ms cubic-bezier(0.4, 0, 0.2, 1) both; }
+.tour-fly .art { width: 100%; height: 100%; }
+@keyframes fly-to {
+  0%   { opacity: 0; transform: translate(var(--fx), var(--fy)) scale(1.4) rotate(-8deg); }
+  14%  { opacity: 1; }
+  56%  { opacity: 1; transform: translate(var(--mx), var(--my)) scale(1.15) rotate(6deg); }
+  100% { opacity: 0; transform: translate(var(--tx), var(--ty)) scale(0.5) rotate(0deg); }
+}
+
+@media (max-width: 479px) { .tour-card { width: 100%; } .slate-board { gap: var(--s-3); } }

@@ -116,8 +116,9 @@ export default function Settings({ appearance, onSignOut, onChangeClass, onRepla
   };
 
   return (
-    <div className="page page-narrow">
+    <div className="page">
       <header className="page-head"><div><h1>Settings</h1><p className="lede">Signed in as <b>{d.user}</b>{d.classLabel ? `, class ${d.classLabel}` : ""}.</p></div></header>
+      <div className="set-cols">
       <div className="stack-lg">
         <Group icon={Palette} title="Look">
           <Row title="Appearance" hint="Auto follows your device."><Segmented label="Appearance" value={theme} onChange={setTheme} options={[["auto", "Auto"], ["light", "Light"], ["dark", "Dark"]]} /></Row>
@@ -132,6 +133,8 @@ export default function Settings({ appearance, onSignOut, onChangeClass, onRepla
           <Action icon={ChevronDown} title="Subjects and colours" hint="Shared with your class" onClick={() => setSub("subjects")} />
           {MC_ON && <Action icon={Gamepad2} title="Minecraft server" onClick={() => setSub("minecraft")} />}
         </Group>
+      </div>
+      <div className="stack-lg">
         <Group icon={Info} title="Help">
           <Action icon={Play} title="Replay Move-In Day" hint="Unbox your room again, one piece at a time" onClick={onReplayTour} />
           <Action icon={Keyboard} title="Keyboard shortcuts" hint="For laptops and desktops" onClick={openHelp} />
@@ -147,6 +150,7 @@ export default function Settings({ appearance, onSignOut, onChangeClass, onRepla
           <p><b>About Homeroom.</b> Designed, built and maintained by one person, Nathaniel Visaya, for students and their classmates.</p>
           <p className="muted small">Shared class tracker. Review tools. Long-term exam prep. Thank you for using it.</p>
         </section>
+      </div>
       </div>
       <Sheet open={sub === "subjects"} onClose={() => setSub(null)} title="Subjects and colours">{sub === "subjects" && <SubjectsPanel subjects={d.subjects} onSet={d.setSubject} />}</Sheet>
       <Sheet open={sub === "feedback"} onClose={() => setSub(null)} title="Send a suggestion">{sub === "feedback" && <FeedbackForm onSend={d.sendFeedback} onClose={() => setSub(null)} />}</Sheet>

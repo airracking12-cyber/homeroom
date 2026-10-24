@@ -26,6 +26,7 @@ import "./styles/components.css";
 import "./styles/layout.css";
 import "./styles/motion.css";
 import "./styles/room.css";
+import "./styles/cinema.css";
 import "./styles/screens-auth.css";
 import "./styles/screens-track.css";
 import "./styles/screens-review.css";

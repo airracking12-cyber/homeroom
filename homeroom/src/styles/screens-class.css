@@ -30,3 +30,10 @@
 .avatar { width: 40px; height: 40px; border-radius: 50%; display: grid; place-items: center; background: var(--accent-wash); color: var(--on-accent-wash); font-weight: 700; }
 .dm-head p[data-on="1"] { color: var(--ok); } .dm-head p[data-on="0"] { color: var(--muted); }
 .dm-msgs { flex: 1; display: flex; flex-direction: column; gap: var(--s-2); padding-bottom: var(--s-3); }
+
+/* wide screens: the seat map on the left, whoever you are looking at on the right (so the page is not one long, half-empty column) */
+.mates-grid { display: grid; gap: var(--s-4); grid-template-columns: minmax(0, 1fr); }
+@media (min-width: 1024px) {
+  .mates-grid { grid-template-columns: minmax(0, 640px) minmax(280px, 1fr); gap: var(--s-6); align-items: start; }
+  .mates-side { position: sticky; top: calc(56px + var(--lights-h) + var(--s-5)); }
+}

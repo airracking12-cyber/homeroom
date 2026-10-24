@@ -155,7 +155,7 @@ function StudyHub({ study, update, load, scope, goNotes, openTask }) {
   const TIcon = TECH_ICON[T.id];
 
   return (
-    <div className="stack-lg">
+    <div className="stack-lg study-grid">
       {resumable && !prep && (
         <Banner tone="accent" icon={Sparkles} action={<><Button size="sm" variant="primary" onClick={continueSession}>Continue</Button><Button size="sm" variant="ghost" onClick={discardSession}>Start over</Button></>}>
           <b>You have a Coach session in progress.</b>
@@ -170,7 +170,7 @@ function StudyHub({ study, update, load, scope, goNotes, openTask }) {
         {hero.cta && <div className="form-actions"><Button variant="primary" size="lg" disabled={!!prep} onClick={hero.act}>{hero.cta}<ArrowRight size={16} aria-hidden="true" /></Button>{hero.more && <Button size="lg" onClick={hero.more}>Details</Button>}</div>}
       </section>
 
-      <section className="stack" aria-label="Choose how to study">
+      <section className="stack study-choose" aria-label="Choose how to study">
         <button type="button" className="card scope-row" onClick={() => setScopeOpen(true)} aria-haspopup="dialog">
           <span className="grow"><span className="eyebrow">Reviewing</span><span className="scope-text">{scopeText}</span><span className="muted small">{scopeCount}</span></span>
           <span className="link" aria-hidden="true">Change</span>
@@ -178,7 +178,7 @@ function StudyHub({ study, update, load, scope, goNotes, openTask }) {
 
         <div className="stack" style={{ gap: 12 }}>
           <div className="chips" role="group" aria-label="What do you want from this session">{GOALS.map(([g]) => <Chip key={g} on={goalId === g} onClick={() => pickGoal(g)}>{GOAL_SHORT[g]}</Chip>)}</div>
-          <div className="stack" style={{ gap: 8 }} role="radiogroup" aria-label="Technique">
+          <div className="stack tech-list" style={{ gap: 8 }} role="radiogroup" aria-label="Technique">
             {goalTechs.map((x) => {
               const Icon = TECH_ICON[x.id];
               return (
@@ -196,7 +196,7 @@ function StudyHub({ study, update, load, scope, goNotes, openTask }) {
       </section>
 
       {upcoming.length > (hero.more ? 1 : 0) && (
-        <section aria-label="Coming up">
+        <section className="study-coming" aria-label="Coming up">
           <h2 className="eyebrow" style={{ marginBottom: 8 }}>Coming up</h2>
           <div className="card card-flat divided">
             {upcoming.filter((u) => !(hero.more && u.t.id === next.t.id)).slice(0, 4).map(({ t, n, ic }) => (

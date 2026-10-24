@@ -17,7 +17,7 @@ test("the three jobs are the first three destinations, and Settings is last", ()
   assert.deepEqual(ids().slice(0, 3), ["track", "review", "prepare"]);
   assert.equal(ids().at(-1), "settings");
   assert.equal(DEFAULT_DEST, "room", "the home screen is your room");
-  assert.equal(ROOM.id, "room"); assert.ok(!ids().includes("room"), "the room is the home, not a sixth tab");
+  assert.equal(ROOM.id, "room"); assert.ok(!ids().includes("room"), "the room is the home, not one of the five destinations (the nav still shows it first, so the home screen is always one tap away)");
 });
 
 test("routes live in the hash, and anything else is the home screen", () => {
@@ -52,7 +52,8 @@ test("every v33 feature has a home in a real destination", () => {
 test("the app renders a screen for every destination, and the shell links to every one", () => {
   const app = read("App.jsx"), shell = read("app/shell.jsx");
   for (const id of [...ids(), "room"]) assert.match(app, new RegExp(`\\b${id}: <`), `${id} has a screen`);
-  assert.match(shell, /DESTINATIONS\.map/);
+  assert.match(shell, /\[ROOM, \.\.\.DESTINATIONS\]\.map/, "the nav starts with the Room, then the five destinations");
+  assert.match(shell, /room: House/);
   assert.match(shell, /aria-current=\{route\.dest === x\.id \? "page" : undefined\}/, "the current destination is announced");
   assert.match(shell, /aria-label="Main"/);
 });

@@ -93,6 +93,24 @@
   --bulb-a: #f2b45a; --bulb-b: #fff0cf; --wire: #8a7560;
   --kraft: #c9a56f; --kraft-2: #b48b57; --kraft-3: #8f6a3c; --tape: #ead9b0;   /* the moving box: decoration only */
 
+  /* the film: Move-In Day opens as a night scene (cold moonlight, then warm lamplight), in both light and night mode */
+  --cine-0: #120c08;             /* black of the film: letterbox bars and title cards */
+  --cine-wall: #2b2530;          /* the bare wall, lit only by the moon */
+  --cine-wall-2: #211c26;
+  --cine-floor: #3a2a1f;
+  --cine-floor-2: #2e2118;
+  --cine-moon: #aac4e8;          /* moonlight: cold */
+  --cine-sky: #1a2236;
+  --cine-warm: #ffbe6e;          /* the box's light and the lamp: warm */
+  --cine-warm-2: #fff0cf;
+  --cine-text: #fbf1de;          /* text on the film: 15:1 on --cine-0 */
+  --cine-text-2: #d9c9ae;        /* quieter text on the film: 10:1 on --cine-0 */
+  --cine-glow: rgba(255, 190, 110, 0.55);
+  --cine-moon-glow: rgba(170, 196, 232, 0.28);
+  --cine-dim: rgba(18, 12, 8, 0.72);
+  --cine-vignette: rgba(18, 12, 8, 0.62);
+  --cine-bar: clamp(28px, calc((100dvh - 100vw / 2.39) / 2), 8dvh);   /* 2.39:1 letterbox on wide screens */
+
   --scrim: rgba(42, 30, 19, 0.5);
   --shadow-edge: rgba(74, 48, 26, 0.2);
   --shadow-soft: rgba(74, 48, 26, 0.14);
@@ -149,6 +167,9 @@
 :root[data-theme="light"] { color-scheme: light; }
 :root[data-theme="dark"] { color-scheme: dark; }
 
+@media (max-aspect-ratio: 1/1) {
+  :root { --cine-bar: clamp(28px, 5dvh, 48px); }
+}
 @media (min-width: 768px) {
   :root { --section: 32px; --pad-card: 20px; --gutter: 24px; }
 }

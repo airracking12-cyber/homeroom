@@ -7,3 +7,7 @@
 .code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: var(--fs-small); background: var(--surface-2); color: var(--ink); padding: var(--s-2) var(--s-3); border-radius: var(--r-control); flex: 1; min-width: 0; overflow-wrap: anywhere; }
 
 .sug.unread { border-color: var(--accent-fill); }
+
+/* wide screens: the settings sit in two columns (how it looks and sounds, and your class, on the left; help, account and about on the right) */
+.set-cols { display: grid; gap: var(--section); grid-template-columns: minmax(0, 1fr); max-width: 760px; }
+@media (min-width: 1024px) { .set-cols { grid-template-columns: repeat(2, minmax(0, 1fr)); max-width: none; gap: var(--s-6); align-items: start; } }

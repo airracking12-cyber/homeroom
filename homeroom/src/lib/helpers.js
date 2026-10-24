@@ -73,3 +73,5 @@ export function buildContext(tasks, materials, progress, user, found) {
   return { today: todayLong(), list: list || "(no tasks yet)", mats: mats || "(no review material yet)" };
 }
 
+// a name as it is said to the person: usernames are lowercase, a greeting is not ("mika" -> "Mika")
+export const nice = (name) => { const n = String(name || "").trim(); return n ? n[0].toUpperCase() + n.slice(1) : n; };

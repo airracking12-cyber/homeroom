@@ -1,7 +1,8 @@
 // Move-In Day: the first-run introduction, as plain data and pure functions (tests/tour.test.mjs).
-// It is an unboxing. Your room is bare; a moving box holds everything. You open it and put one piece in its place at a time,
-// and each piece lights up the REAL part of the app it stands for. Five steps at most. It can be skipped at any point,
-// remembers where you were, and ends with your first real notes on the shelf, not a "done" screen.
+// It is a short film about an unboxing. It opens on a title card, then a bare dorm room at night with one moving box in it.
+// You open the box, the room warms up piece by piece (a move-in montage), and then each piece is put in its place in the
+// REAL app: a spotlight on the part it stands for, a clapperboard slate for every scene. Five steps at most. It can be
+// skipped at any point, remembers where you were, and ends with your first real notes on the shelf, not a "done" screen.
 import { APP_NAME } from "../../lib/constants.js";
 
 // The credit is fixed text. It names one person and says what he built. It opens the introduction; Settings > About and sign-in keep it too.
@@ -17,7 +18,8 @@ export const MAX_STEPS = 5;
 export const STEPS = Object.freeze([
   { id: "welcome", slot: "The box", item: "box", route: null, targets: [], cta: "Open the box", ctaOpen: "Start unpacking",
     title: `Welcome to ${APP_NAME}`,
-    body: "Today is move-in day. Your room is bare, and everything you need is packed in this box. Let's unpack it together, one piece at a time." },
+    body: "Today is move-in day. Your room is bare, and everything you need is packed in this box.",
+    afterOpen: "Five pieces, one room. Let's unpack them one at a time." },
   { id: "corkboard", slot: "Corkboard", item: "corkboard", route: ["room"], targets: ["nav-track", "room-track"], cta: "Next",
     title: "Hang the corkboard",
     body: "Track is your corkboard. Pin homework and deadlines here, and your whole class sees them too." },
@@ -54,6 +56,26 @@ export const ctaFor = (step, opened) => (step.id === "welcome" && opened ? step.
 // "Unpacked N of 5": the box counts once it is open, then each piece as you reach it.
 export const unpackedCount = (stepIndex, opened) => (stepIndex === 0 ? (opened ? 1 : 0) : Math.min(STEPS.length, stepIndex + 1));
 export const slotStates = (stepIndex, opened) => STEPS.map((s, i) => ({ id: s.id, label: s.slot, done: i < unpackedCount(stepIndex, opened) }));
+
+// ── the opening shot: a timeline of phases (the CSS in cinema.css plays each one; these are only the lengths) ──
+//   title    the title card (Nathaniel Visaya presents, Move-In Day)       scene   the bare room, the box, the subtitles
+//   ripping  the tape tears                                                open    the flaps swing out and the light spills
+//   placing  the pieces fly out and into the room, one after another       ready   the room is warm: Start unpacking
+//   exit     the light fills the screen and the real room is behind it
+export const PHASES = Object.freeze(["title", "scene", "ripping", "open", "placing", "ready", "exit"]);
+export const PROP_COUNT = 5;
+export const OPENING = Object.freeze({ title: 3800, titleReduced: 0, rip: 1150, open: 1000, placeStep: 620, placeDur: 1050, exit: 950 });
+// when each piece lands, counted from the start of the placing phase
+export const landsAt = (i) => i * OPENING.placeStep + OPENING.placeDur;
+export const placingLength = () => landsAt(PROP_COUNT - 1) + 150;
+// the phase that follows `p` by itself (the person's taps start ripping and exit; the rest are timers)
+export function nextPhase(p) {
+  const i = PHASES.indexOf(p);
+  return i < 0 || p === "scene" || p === "ready" || p === "exit" ? p : PHASES[i + 1];
+}
+export const sceneLabel = (stepIndex) => `Scene ${stepIndex + 1}`;
+// "Unpacked N of 5" while the montage plays: the box counts first, then every piece that has landed
+export const unpackedDuring = (placed, boxOpen) => (boxOpen ? Math.min(STEPS.length, 1 + placed) : 0);
 
 // ── finding what to point at ──
 // candidates are data-tour ids in order of preference; isVisible says whether an id is on screen right now.

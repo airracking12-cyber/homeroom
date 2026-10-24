@@ -74,7 +74,10 @@ test("the four reusable animations (unpack, pop-in, stick, glow) and the celebra
   for (const cls of [".unpack", ".pop-in", ".stick", ".glow-layer", ".celebrate"]) assert.ok(css("motion.css").includes(cls), cls);
   // nothing else may define its own entrance: every keyframes name in the app is on this list
   const names = [...ALL.matchAll(/@keyframes\s+([\w-]+)/g)].map((m) => m[1]).sort();
-  assert.deepEqual(names, ["confetti", "fade-in", "glow", "indet", "pop-in", "shake", "shimmer", "stick", "sync-sweep", "unpack"]);
+  const CINEMA_ONLY = ["bar-in", "clap", "cine-out", "curtain", "cut-text", "flash-bloom", "fly-to", "mote", "prop-fly", "ring-hit", "ring-in", "strand-in", "sub-in", "tape-rip", "title-away", "title-line"];
+  assert.deepEqual(names, ["confetti", "fade-in", "glow", "indet", "pop-in", "shake", "shimmer", "stick", "sync-sweep", "unpack", ...CINEMA_ONLY].sort());
+  // the film's own animations live in cinema.css and nowhere else, and the ones above live in motion.css or their own screen
+  for (const n of CINEMA_ONLY) assert.match(css("cinema.css"), new RegExp(`@keyframes\\s+${n}\\s*\\{`), `${n} belongs to the film`);
 });
 
 test("glow is built as an opacity-animated layer, and decoration never takes taps or sits in front of controls", () => {
