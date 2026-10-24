@@ -4,6 +4,19 @@ import { useState, useEffect, useCallback } from "react";
 import { store } from "../lib/services.js";
 import { Sound } from "../lib/sound.js";
 
+// Is the room in night mode (the lamp on)? True when forced dark, or when "auto" and the device is dark.
+export function useNight(theme) {
+  const mq = () => (typeof window !== "undefined" && window.matchMedia ? window.matchMedia("(prefers-color-scheme: dark)") : null);
+  const [sys, setSys] = useState(() => !!mq()?.matches);
+  useEffect(() => {
+    const m = mq(); if (!m) return undefined;
+    const on = () => setSys(m.matches);
+    m.addEventListener?.("change", on);
+    return () => m.removeEventListener?.("change", on);
+  }, []);
+  return theme === "dark" || (theme === "auto" && sys);
+}
+
 export function useAppearance(ready) {
   const [theme, setTheme] = useState("auto");
   const [audio, setAudio] = useState({ sfx: true, music: false, vol: 0.5 });

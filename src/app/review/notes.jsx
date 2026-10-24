@@ -5,13 +5,13 @@ import { Plus, Upload, FileText, NotebookPen, Sparkles, Search, ChevronRight, Ch
 import { notes } from "../../lib/services.js";
 import { subjColor } from "../../lib/constants.js";
 import { timeAgo } from "../../lib/dates.js";
-import { extractFromFile, uid } from "../../lib/helpers.js";
 import { matchTopic, topicList } from "../../lib/notes.js";
+import { useData } from "../data.jsx";
+import { IngestList } from "../ingest.jsx";
 import { groupBySubject, libraryStats, untopiced, fmtBytes, NO_TOPIC } from "../../lib/library.js";
 import { parseReviewer } from "../../lib/reviewerDoc.js";
-import { suggestTopic } from "../../lib/review-ai.js";
 import { Sound } from "../../lib/sound.js";
-import { Button, Chip, Segmented, Field, Banner, Empty, Sheet, Dots, Spinner, cx } from "../ui.jsx";
+import { Button, Chip, Segmented, Field, Banner, Empty, Sheet, Dots, cx } from "../ui.jsx";
 import { SubjectPicker } from "../track/parts.jsx";
 
 export const kindMeta = (m) => (m.kind === "ai" ? { label: "Assistant", Icon: Sparkles } : m.kind === "reviewer" ? { label: "Reviewer", Icon: NotebookPen } : { label: "Notes", Icon: FileText });
@@ -44,95 +44,83 @@ export function NoteBody({ id, doc }) {
   return doc ? <ReviewerDoc text={t} /> : <div className="note-text">{t}</div>;
 }
 
-const FILE_MAX = 10 * 1024 * 1024; // the assistant reads PDFs and photos up to this size
+const FILE_MAX = 10 * 1024 * 1024; // the largest file kept as an original
+const TEXT_FILE = /\.(txt|md|csv|json)$/i;
 
-export function AddNotesSheet({ open, onClose, materials, subjects, onAddSubject, fixedSubject, defaultSubject, defaultTopic, heading, onSave, seed, allowReviewer = true }) {
-  const [kind, setKind] = useState("upload");
-  const [title, setTitle] = useState("");
+// Add notes: paste or choose files, one confirm, done. The raw input is saved the moment you confirm; the assistant then reads it
+// in parts in the background (progress cards below), and anything it can't read is listed with a one-tap way to try again.
+export function AddNotesSheet({ open, onClose, materials, subjects, onAddSubject, fixedSubject, defaultSubject, defaultTopic, heading, seed, allowReviewer = true, taskId, taskTitle }) {
+  const d = useData();
   const [text, setText] = useState("");
   const [subject, setSubject] = useState(fixedSubject || defaultSubject || "");
   const [topic, setTopic] = useState(defaultTopic || "");
-  const [reading, setReading] = useState("");
-  const [suggesting, setSuggesting] = useState(false);
-  const [saving, setSaving] = useState("");
-  const [err, setErr] = useState("");
+  const [title, setTitle] = useState("");
+  const [mine, setMine] = useState(false);          // "a reviewer I made"
   const [files, setFiles] = useState([]);
+  const [saving, setSaving] = useState(false);
+  const [saved, setSaved] = useState(null);         // null while editing; the ids of what was saved afterwards
+  const [err, setErr] = useState("");
   const [over, setOver] = useState(false);
   const fileRef = useRef(null);
   useEffect(() => { if (open) { setSubject(fixedSubject || defaultSubject || ""); setTopic(defaultTopic || ""); } }, [open, fixedSubject, defaultSubject, defaultTopic]);
-  const allTopics = useMemo(() => topicList(materials, subject ? [subject] : []), [materials, subject]);
-  const names = allTopics.map((x) => x.topic);
-  const suggest = async (txt) => {
-    const body = typeof txt === "string" ? txt : text;
-    if (!body.trim() || suggesting) return;
-    setSuggesting(true);
-    try { const t = await suggestTopic(body, subject); if (t) setTopic((cur) => cur.trim() || matchTopic(t, names)); } catch { /* the student can type one */ } finally { setSuggesting(false); }
+  const names = useMemo(() => topicList(materials, subject ? [subject] : []).map((x) => x.topic), [materials, subject]);
+  const addFiles = (list) => {
+    const picked = [...(list || [])]; if (!picked.length) return;
+    const big = picked.filter((f) => f.size > FILE_MAX), okay = picked.filter((f) => f.size <= FILE_MAX);
+    const odd = okay.filter((f) => !(/\.pdf$/i.test(f.name) || f.type === "application/pdf" || f.type.startsWith("image/") || TEXT_FILE.test(f.name) || f.type.startsWith("text/")));
+    const good = okay.filter((f) => !odd.includes(f));
+    setErr(big.length || odd.length ? `${[...big.map((f) => `${f.name} is over 10 MB`), ...odd.map((f) => `${f.name} isn't a PDF, photo or text file`)].join(". ")}. ${good.length ? "The others were added." : "Pick a smaller file, or paste the notes instead."}` : "");
+    if (big.length || odd.length) Sound.play("err");
+    setFiles((c) => [...c, ...good.filter((f) => !c.some((x) => x.name === f.name && x.size === f.size))]);
   };
-  const readFiles = async (list) => {
-    const picked = [...(list || [])];
-    if (!picked.length) return;
-    setErr("");
-    if (!title) setTitle(picked[0].name.replace(/\.[^.]+$/, ""));
-    const parts = [], okFiles = [];
-    for (let i = 0; i < picked.length; i++) {
-      const f = picked[i];
-      setReading(picked.length > 1 ? `Reading file ${i + 1} of ${picked.length}` : "Reading file");
-      try {
-        if (f.size > FILE_MAX) throw new Error("big");
-        if (/\.pdf$/i.test(f.name) || f.type === "application/pdf" || f.type.startsWith("image/")) {
-          const out = await extractFromFile(f);
-          if (!out.trim()) throw new Error("empty");
-          parts.push(out.trim());
-        } else {
-          const t = await new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(String(r.result)); r.onerror = rej; r.readAsText(f); });
-          parts.push(t.slice(0, 20000));
-        }
-        okFiles.push({ name: f.name, size: f.size, file: f });
-      } catch { setErr(`We couldn't read ${f.name}. Files can be up to 10 MB: PDFs, photos or text files. You can also paste the notes below.`); Sound.play("err"); }
-    }
-    setReading("");
-    setFiles((c) => [...c, ...okFiles]);
-    if (parts.length) {
-      setText((cur) => [cur.trim(), ...parts].filter(Boolean).join("\n\n"));
-      Sound.play("pop");
-      if (!topic.trim()) suggest([text.trim(), ...parts].filter(Boolean).join("\n\n"));
-    }
-  };
-  const onFile = (e) => { const list = [...(e.target.files || [])]; e.target.value = ""; readFiles(list); };
-  useEffect(() => { if (open && seed && seed.files && seed.files.length) readFiles(seed.files); }, [seed && seed.id]); // eslint-disable-line react-hooks/exhaustive-deps
-  const need = !text.trim() ? "Add some notes first" : !subject ? "Pick a subject first" : "";
-  const canSave = !need && !reading && !saving;
-  const save = async (e) => {
-    e?.preventDefault(); setErr(""); setSaving("Saving");
-    const keep = files.length === 1 ? files[0].file : null; // one file keeps its original; several are merged into one note
-    const ok = await onSave({ title: title.trim() || "Untitled notes", text: text.trim(), subject, topic: matchTopic(topic, names), kind, fileObj: keep, onProgress: setSaving });
-    setSaving("");
-    if (ok) { setTitle(""); setText(""); setTopic(""); setFiles([]); setKind("upload"); onClose(); }
-    else { setErr("We couldn't save those notes just now. Check your connection and try again."); Sound.play("err"); }
+  useEffect(() => { if (open && seed && seed.files && seed.files.length) addFiles(seed.files); }, [seed && seed.id]); // eslint-disable-line react-hooks/exhaustive-deps
+  const need = !text.trim() && !files.length ? "Add some notes first" : !subject ? "Pick a subject first" : "";
+  const reset = () => { setText(""); setTitle(""); setTopic(""); setFiles([]); setMine(false); setSaved(null); setErr(""); setSaving(false); };
+  const close = () => { if (!saving) { onClose(); setTimeout(reset, 250); } };
+  const confirm = async (e) => {
+    e?.preventDefault(); if (need || saving) return;
+    setErr(""); setSaving(true);
+    const r = await d.ingest.start({ text, files, title: title.trim(), subject, topic: matchTopic(topic, names), kind: mine ? "reviewer" : "upload", taskId, taskTitle });
+    setSaving(false);
+    if (r.ids.length) { setSaved(r.ids); Sound.play("pop"); }
+    if (!r.ok) { setErr(r.ids.length ? "Some of that couldn't be saved. What was saved is below; add the rest again." : "We couldn't save those notes just now. Check your connection and try again."); Sound.play("err"); }
   };
   return (
-    <Sheet open={open} onClose={() => { if (!saving) onClose(); }} title={heading || "Add notes"}>
-      <form className="stack" onSubmit={save}>
-        <p className="muted small">Everyone in your class can read and study from what you add.</p>
-        {allowReviewer && <Segmented label="What are you adding" value={kind} onChange={setKind} options={[["upload", "Class notes"], ["reviewer", "A reviewer I made"]]} />}
-        <input ref={fileRef} type="file" multiple accept=".pdf,image/*,.txt,.md,.csv,.json,text/plain" hidden onChange={onFile} />
-        <button type="button" className="dropzone" data-over={over ? 1 : undefined} disabled={!!reading || !!saving} onClick={() => fileRef.current?.click()}
-          onDragOver={(e) => { e.preventDefault(); setOver(true); }} onDragLeave={() => setOver(false)} onDrop={(e) => { e.preventDefault(); setOver(false); readFiles(e.dataTransfer && e.dataTransfer.files); }}>
-          <span className="glyph">{reading ? <Spinner size={20} /> : <Upload size={20} aria-hidden="true" />}</span>
-          <span><b>{reading ? <>{reading}<Dots /></> : "Choose a PDF, photo or text file"}</b><span className="small muted" style={{ display: "block" }}>Up to 10 MB each. We read it into text you can edit. Or paste below.</span></span>
-        </button>
-        {files.length > 0 && <div className="cluster">{files.map((f, i) => <span key={i} className="badge badge-ok"><Check size={12} aria-hidden="true" />{f.name} <span style={{ fontWeight: 400 }}>{fmtBytes(f.size)}</span></span>)}{files.length === 1 && <span className="caption">The original is kept so classmates can download it.</span>}</div>}
-        <Field label={kind === "reviewer" ? "Your reviewer" : "Notes"} htmlFor="an-text"><textarea id="an-text" className="textarea" style={{ minHeight: 140 }} value={text} onChange={(e) => setText(e.target.value)} placeholder={kind === "reviewer" ? "Paste or type your reviewer" : "Paste notes here"} /></Field>
-        {!fixedSubject && <Field label="Subject"><SubjectPicker subjects={subjects} value={subject} onChange={setSubject} onAdd={onAddSubject} /></Field>}
-        <Field label="Topic or lesson" optional htmlFor="an-topic" help="A topic helps Homeroom find the right lesson later.">
-          <input id="an-topic" className="input" value={topic} maxLength={60} onChange={(e) => setTopic(e.target.value)} placeholder="Photosynthesis" />
-          {allTopics.length > 0 && <div className="chips" style={{ marginTop: 8 }}>{allTopics.slice(0, 8).map((x) => <Chip key={x.topic} on={topic.trim().toLowerCase() === x.topic.toLowerCase()} onClick={() => setTopic(x.topic)}>{x.topic}</Chip>)}</div>}
-          {text.trim() && !topic.trim() && <div><Button size="sm" disabled={suggesting} onClick={() => suggest()}><Sparkles size={14} aria-hidden="true" />{suggesting ? <>Thinking<Dots /></> : "Suggest a topic"}</Button></div>}
-        </Field>
-        <Field label="Title" optional htmlFor="an-title"><input id="an-title" className="input" value={title} maxLength={120} onChange={(e) => setTitle(e.target.value)} placeholder="Lesson 2.1 key points" /></Field>
-        {err && <Banner tone="bad">{err}</Banner>}
-        <Button variant="primary" size="lg" block type="submit" disabled={!canSave}>{saving ? <>{saving}<Dots /></> : need || "Share with class"}</Button>
-      </form>
+    <Sheet open={open} onClose={close} title={heading || "Add notes"}>
+      {saved ? (
+        <div className="stack">
+          <p className="muted small">Saved and shared with your class. You can close this: the assistant keeps reading in the background, and picks up again if you close Homeroom.</p>
+          <IngestList ingest={d.ingest} ids={saved} />
+          {err && <Banner tone="bad">{err}</Banner>}
+          <div className="form-actions"><Button variant="primary" onClick={close}>Close</Button><Button onClick={reset}>Add more</Button></div>
+        </div>
+      ) : (
+        <form className="stack" onSubmit={confirm}>
+          <p className="muted small">Everyone in your class can read and study from what you add.</p>
+          <input ref={fileRef} type="file" multiple accept=".pdf,image/*,.txt,.md,.csv,.json,text/plain" hidden onChange={(e) => { const l = [...(e.target.files || [])]; e.target.value = ""; addFiles(l); }} />
+          <button type="button" className="dropzone" data-over={over ? 1 : undefined} disabled={saving} onClick={() => fileRef.current?.click()}
+            onDragOver={(e) => { e.preventDefault(); setOver(true); }} onDragLeave={() => setOver(false)} onDrop={(e) => { e.preventDefault(); setOver(false); addFiles(e.dataTransfer && e.dataTransfer.files); }}>
+            <span className="glyph"><Upload size={20} aria-hidden="true" /></span>
+            <span><b>Choose a PDF, photo or text file</b><span className="small muted" style={{ display: "block" }}>Up to 10 MB each. Your original is kept as it is. Or paste below.</span></span>
+          </button>
+          {files.length > 0 && <div className="cluster">{files.map((f, i) => <span key={`${f.name}${i}`} className="badge badge-ok"><Check size={12} aria-hidden="true" />{f.name} <span style={{ fontWeight: 400 }}>{fmtBytes(f.size)}</span><button type="button" className="chip-x" aria-label={`Remove ${f.name}`} onClick={() => setFiles((c) => c.filter((_, j) => j !== i))}><X size={12} aria-hidden="true" /></button></span>)}</div>}
+          <Field label="Notes" htmlFor="an-text"><textarea id="an-text" className="textarea" style={{ minHeight: 140 }} value={text} onChange={(e) => setText(e.target.value)} placeholder="Paste your notes here" /></Field>
+          {!fixedSubject && <Field label="Subject"><SubjectPicker subjects={subjects} value={subject} onChange={setSubject} onAdd={onAddSubject} /></Field>}
+          <details className="more">
+            <summary>Add a topic or title (optional)</summary>
+            <div className="stack" style={{ marginTop: 12 }}>
+              <Field label="Topic or lesson" htmlFor="an-topic" help="Left empty, Homeroom names the topic for you.">
+                <input id="an-topic" className="input" value={topic} maxLength={60} onChange={(e) => setTopic(e.target.value)} placeholder="Photosynthesis" />
+                {names.length > 0 && <div className="chips" style={{ marginTop: 8 }}>{names.slice(0, 8).map((t) => <Chip key={t} on={topic.trim().toLowerCase() === t.toLowerCase()} onClick={() => setTopic(t)}>{t}</Chip>)}</div>}
+              </Field>
+              <Field label="Title" htmlFor="an-title"><input id="an-title" className="input" value={title} maxLength={120} onChange={(e) => setTitle(e.target.value)} placeholder="Lesson 2.1 key points" /></Field>
+            </div>
+          </details>
+          {allowReviewer && <label className="check-row"><input type="checkbox" checked={mine} onChange={(e) => setMine(e.target.checked)} /> <span>This is a reviewer I made myself</span></label>}
+          {err && <Banner tone="bad">{err}</Banner>}
+          <Button variant="primary" size="lg" block type="submit" disabled={!!need || saving}>{saving ? <>Saving<Dots /></> : need || "Share with class"}</Button>
+        </form>
+      )}
     </Sheet>
   );
 }
@@ -201,7 +189,8 @@ export function NoteSheet({ note, onClose, onStudy, onEdit, onRemove }) {
 }
 
 // The class library: every note and reviewer by subject and topic.
-export function Library({ tasks, materials, subjects, onAddSubject, addNote, removeMaterial, relabelMaterial, onStudy, onReviewer, openId, setOpenId }) {
+export function Library({ tasks, materials, subjects, onAddSubject, removeMaterial, relabelMaterial, onStudy, onReviewer, openId, setOpenId }) {
+  const d = useData();
   const [subj, setSubj] = useState(null);
   const [q, setQ] = useState("");
   const [hits, setHits] = useState(null);
@@ -241,8 +230,9 @@ export function Library({ tasks, materials, subjects, onAddSubject, addNote, rem
     <div className="stack" data-over={over ? 1 : undefined} {...dropProps}>
       <div className="between wrap">
         <p className="muted small" style={{ maxWidth: "52ch" }}>{stats.notes ? `${stats.notes} notes, ${stats.subjects} subjects, ${stats.ideas} key ideas. Everything you review is built from these.` : "Everyone\u2019s notes and reviewers collect here."}</p>
-        <Button variant="primary" onClick={startAdd}><Plus size={16} aria-hidden="true" />Add notes</Button>
+        <Button variant="primary" data-tour="add-notes" onClick={startAdd}><Plus size={16} aria-hidden="true" />Add notes</Button>
       </div>
+      <IngestList ingest={d.ingest} />
       <div className="toolbar">
         <label className="searchbox"><Search size={16} aria-hidden="true" /><input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Find a lesson: a word or topic" aria-label="Search the notes" type="search" />{q && <button type="button" aria-label="Clear search" onClick={() => setQ("")}><X size={16} /></button>}</label>
         <Segmented label="Whose notes" value={scopeMine} onChange={setScopeMine} options={[["all", "Everyone"], ["mine", "Mine"]]} />
@@ -270,7 +260,7 @@ export function Library({ tasks, materials, subjects, onAddSubject, addNote, rem
           ))}
         </section>
       ) : groups.length === 0 ? (
-        <Empty icon={FileUp} title={scopeMine === "mine" ? "You haven\u2019t added anything yet" : "No notes yet"} action={<Button variant="primary" onClick={startAdd}>Add the first notes</Button>}>{scopeMine === "mine" ? "Add your notes and your classmates can study from them too." : "Add notes and your class can review from them. Drop a PDF or photo here, or paste text."}</Empty>
+        <Empty icon={FileUp} title={scopeMine === "mine" ? "You haven\u2019t added anything yet" : "The shelf is empty"} action={<Button variant="primary" data-tour="add-notes" onClick={startAdd}>Unpack the first notes</Button>}>{scopeMine === "mine" ? "Add your notes and your classmates can study from them too." : "Add notes and your class can review from them. Drop a PDF or photo here, or paste text."}</Empty>
       ) : (
         <section aria-label="Subjects">
           <h2 className="eyebrow" style={{ marginBottom: 8 }}>Subjects</h2>
@@ -285,7 +275,7 @@ export function Library({ tasks, materials, subjects, onAddSubject, addNote, rem
           </div>
         </section>
       )}
-      <AddNotesSheet open={adding} onClose={() => setAdding(false)} materials={all} subjects={subjects} onAddSubject={onAddSubject} defaultSubject={group ? group.subject : ""} seed={seed} heading="Add notes" onSave={(f) => addNote(f)} />
+      <AddNotesSheet open={adding} onClose={() => setAdding(false)} materials={all} subjects={subjects} onAddSubject={onAddSubject} defaultSubject={group ? group.subject : ""} seed={seed} heading="Add notes" />
       <EditNoteSheet note={editing} materials={all} subjects={subjects} onAddSubject={onAddSubject} onClose={() => setEditing(null)} onSave={(patch) => relabelMaterial(editing.id, patch)} />
       <NoteSheet note={note} onClose={() => setOpenId(null)} onStudy={(m) => { setOpenId(null); study({ subjects: [m.subject], topics: m.topic ? [m.topic] : [] }); }} onEdit={(m) => { setOpenId(null); setEditing(m); }} onRemove={(m) => { setOpenId(null); removeMaterial(m.id); }} />
     </div>

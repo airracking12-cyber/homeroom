@@ -586,14 +586,21 @@ export default function Prepare() {
         : `${timeLeftLabel(today, plan.target)} to go.`;
 
   return (
-    <div className={cx("page", setup && "page-narrow")}>
+    <div className="page">
       <header className="page-head"><div><h1>{title}</h1><p className="lede">{lede}</p></div></header>
 
       {status === "loading" && <Skeleton rows={3} h={72} />}
       {status === "error" && <Banner tone="bad" action={<Button size="sm" onClick={retry}>Try again</Button>}>We couldn&rsquo;t load your plans. Check your connection, then try again. Your saved plans are safe.</Banner>}
 
       {status === "ready" && setup && (
-        <Setup user={user} today={today} defaultGrade={defaultGrade} subjects={subjects} presetKind={presetKind} canCancel={!!plan} onCancel={() => setAdding(false)} onDone={addPlan} />
+        <div className="prep-setup">
+          <Setup user={user} today={today} defaultGrade={defaultGrade} subjects={subjects} presetKind={presetKind} canCancel={!!plan} onCancel={() => setAdding(false)} onDone={addPlan} />
+          <aside className="card prep-aside" aria-label="About Prepare">
+            <h2>A little each week</h2>
+            <p>Prepare turns a big goal, like next year&rsquo;s subjects or an entrance exam, into small pieces you work through week by week.</p>
+            <p className="muted small">It takes four short steps. You can add another plan later.</p>
+          </aside>
+        </div>
       )}
 
       {status === "ready" && !setup && (

@@ -2,7 +2,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { DESTINATIONS, DEFAULT_DEST, ids, parseRoute, hashFor, shortcutDest, FEATURE_HOME } from "../src/app/nav.js";
+import { DESTINATIONS, DEFAULT_DEST, ROOM, ids, parseRoute, hashFor, shortcutDest, FEATURE_HOME } from "../src/app/nav.js";
 
 const read = (p) => readFileSync(new URL("../src/" + p, import.meta.url), "utf8");
 
@@ -16,16 +16,18 @@ test("four or five top-level destinations, each with a label, a title and a uniq
 test("the three jobs are the first three destinations, and Settings is last", () => {
   assert.deepEqual(ids().slice(0, 3), ["track", "review", "prepare"]);
   assert.equal(ids().at(-1), "settings");
-  assert.equal(DEFAULT_DEST, "track");
+  assert.equal(DEFAULT_DEST, "room", "the home screen is your room");
+  assert.equal(ROOM.id, "room"); assert.ok(!ids().includes("room"), "the room is the home, not one of the five destinations (the nav still shows it first, so the home screen is always one tap away)");
 });
 
 test("routes live in the hash, and anything else is the home screen", () => {
   assert.deepEqual(parseRoute("#/review/notes"), { dest: "review", parts: ["notes"] });
   assert.deepEqual(parseRoute("#/track/task/abc"), { dest: "track", parts: ["task", "abc"] });
   assert.deepEqual(parseRoute("#/prepare/new/exam"), { dest: "prepare", parts: ["new", "exam"] });
-  assert.deepEqual(parseRoute(""), { dest: "track", parts: [] });
-  assert.deepEqual(parseRoute("#/nonsense/x"), { dest: "track", parts: [] });
-  assert.equal(parseRoute("#access_token=abc&type=recovery").dest, "track", "an email sign-in link is not a route");
+  assert.deepEqual(parseRoute(""), { dest: "room", parts: [] });
+  assert.deepEqual(parseRoute("#/room"), { dest: "room", parts: [] });
+  assert.deepEqual(parseRoute("#/nonsense/x"), { dest: "room", parts: [] });
+  assert.equal(parseRoute("#access_token=abc&type=recovery").dest, "room", "an email sign-in link is not a route");
   assert.deepEqual(parseRoute("#/review/%E2%9C%93"), { dest: "review", parts: ["\u2713"] });
 });
 
@@ -37,19 +39,21 @@ test("hashFor and parseRoute are inverses, and empty parts are dropped", () => {
 test("g then a letter reaches every destination", () => {
   for (const d of DESTINATIONS) assert.equal(shortcutDest(d.key), d.id);
   assert.equal(shortcutDest("T"), "track");
+  assert.equal(shortcutDest("h"), "room");
   assert.equal(shortcutDest("z"), null);
 });
 
 test("every v33 feature has a home in a real destination", () => {
-  const homes = new Set([...ids(), "global", "admin"]);
+  const homes = new Set([...ids(), "room", "global", "admin"]);
   for (const [feature, home] of Object.entries(FEATURE_HOME)) assert.ok(homes.has(home), `${feature} -> ${home}`);
   assert.ok(Object.keys(FEATURE_HOME).length >= 30, "the inventory is complete");
 });
 
 test("the app renders a screen for every destination, and the shell links to every one", () => {
   const app = read("App.jsx"), shell = read("app/shell.jsx");
-  for (const id of ids()) assert.match(app, new RegExp(`\\b${id}: <`), `${id} has a screen`);
-  assert.match(shell, /DESTINATIONS\.map/);
+  for (const id of [...ids(), "room"]) assert.match(app, new RegExp(`\\b${id}: <`), `${id} has a screen`);
+  assert.match(shell, /\[ROOM, \.\.\.DESTINATIONS\]\.map/, "the nav starts with the Room, then the five destinations");
+  assert.match(shell, /room: House/);
   assert.match(shell, /aria-current=\{route\.dest === x\.id \? "page" : undefined\}/, "the current destination is announced");
   assert.match(shell, /aria-label="Main"/);
 });

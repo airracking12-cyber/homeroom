@@ -19,3 +19,22 @@ export async function writeOnboardingFlag(supabase, done) {
     return !error;
   } catch { return false; }
 }
+
+// Whether the one-time offer of the Move-In Day tour has been answered. Same place as the flag above, so it follows the
+// person to every device; a missing value means "not asked yet". Skipping or declining never touches anything else.
+export const OFFER = "tourOffered";
+
+export async function readTourOffered(supabase) {
+  try {
+    const { data } = await supabase.auth.getSession();
+    const v = data && data.session && data.session.user && data.session.user.user_metadata ? data.session.user.user_metadata[OFFER] : undefined;
+    return v === true;
+  } catch { return false; }
+}
+
+export async function writeTourOffered(supabase) {
+  try {
+    const { error } = await supabase.auth.updateUser({ data: { [OFFER]: true } });
+    return !error;
+  } catch { return false; }
+}

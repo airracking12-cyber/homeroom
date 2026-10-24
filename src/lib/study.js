@@ -3,12 +3,15 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { store, notes } from "./services.js";
 import { callClaude, parseJSON } from "./ai.js";
+import { makeChunks } from "./ingest.js";
+import { BOX_DAYS, shuffle, norm, escRe, lev, sameAnswer, maskIdea, mcFallback } from "./study-core.js";
+export { BOX_DAYS, shuffle, norm, escRe, lev, sameAnswer, maskIdea, mcFallback };
 import { readOutcome } from "./store.js";
 import { createDebouncedSaver } from "./debounce.js";
 import { todayISO, diffDays } from "./dates.js";
 
-export const BOX_DAYS = [0, 1, 2, 4, 8, 16]; // spaced repetition: how many days until a card comes back, by box
 export const TECHS = [
+  { id: "coach", goal: "understand", name: "Coach me", tip: "A short session that mixes recalling, explaining, why and using it, asks how sure you are first, and ends with coaching. The best place to start.", time: "10 min" },
   { id: "cards", goal: "memorize", name: "Flashcards", tip: "Best for memorizing. Cards you miss come back sooner, ones you know come back later.", time: "5 to 10 min" },
   { id: "cloze", goal: "memorize", name: "Fill the blanks", tip: "Good for exact wording, definitions and formulas.", time: "5 min" },
   { id: "match", goal: "memorize", name: "Match pairs", tip: "A light warm-up that connects each term to its meaning.", time: "3 min" },
@@ -22,13 +25,6 @@ export const TECHS = [
 export const GOALS = [["memorize", "To memorize it", "Facts, terms and formulas"], ["understand", "To really understand it", "Explain it, find your gaps"], ["test", "To test yourself", "Check you're ready"], ["plan", "To plan ahead", "A little each day"]];
 export const PERIODS = [["today", "Today", "Notes from the last two days, and what's due soon"], ["week", "This week", "Notes from the last 7 days, and what's due this week"], ["final", "Final", "Everything in this quarter"]];
 
-export const shuffle = (a) => { const b = [...a]; for (let i = b.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [b[i], b[j]] = [b[j], b[i]]; } return b; };
-export const norm = (s) => String(s || "").toLowerCase().replace(/[^\p{L}\p{N}]+/gu, " ").trim();
-export const escRe = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-export const lev = (a, b) => { const m = a.length, n = b.length; if (!m) return n; if (!n) return m; let p = Array.from({ length: n + 1 }, (_, j) => j); for (let i = 1; i <= m; i++) { const c = [i]; for (let j = 1; j <= n; j++) c[j] = Math.min(p[j] + 1, c[j - 1] + 1, p[j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1)); p = c; } return p[n]; };
-export const sameAnswer = (a, b) => { const x = norm(a), y = norm(b); return !!x && (x === y || (y.length >= 5 && lev(x, y) <= 1)); };
-export const maskIdea = (d, c) => { const re = new RegExp(escRe(c), "i"); return re.test(d) ? d.replace(re, "_____") : null; };
-export const chunkText = (text, size) => { const out = []; let cur = ""; String(text || "").split("\n").forEach((l) => { if (cur.length + l.length > size && cur) { out.push(cur); cur = ""; } cur += l + "\n"; }); if (cur.trim()) out.push(cur); return out; };
 export const subjectOfMat = (m, tasks) => m.subject || tasks.find((t) => t.id === m.taskId)?.subject || "General";
 
 export function inPeriod(m, t, period, cq) {
@@ -51,7 +47,7 @@ export function localIdeas(text) {
 export const DIGEST_SYSTEM = `You build a complete study inventory from class notes. List EVERY distinct idea a student could be tested on: each definition, term, rule, formula, step, date, name, cause and effect, and example. Never skip something and never merge two different ideas. Reply with ONLY JSON, no other text: {"ideas":[{"t":"short label, 2 to 6 words","d":"one clear sentence that states the fact","c":"the single most important word or number from d, copied exactly as written in d","k":"term|fact|formula|process|date|example"}]}`;
 export async function aiIdeas(text, title, subject) {
   const out = [];
-  for (const ch of chunkText(text, 3000)) {
+  for (const ch of makeChunks(text).map((c) => c.text)) { // whole sentences only, never cut mid-sentence (lib/ingest.js)
     const raw = await callClaude(DIGEST_SYSTEM, [{ role: "user", content: `Subject: ${subject}\nNote title: ${title}\n\nNOTES:\n${ch}` }]);
     const j = parseJSON(raw);
     if (!j || !Array.isArray(j.ideas)) throw new Error("bad inventory");
@@ -173,16 +169,6 @@ export function useStudy(user, onSaved) {
 }
 export const missCard = (s, id) => ({ ...s, cards: { ...s.cards, [id]: { ...(s.cards[id] || { s: 0, m: 0 }), b: 1, due: todayISO(), s: ((s.cards[id] || {}).s || 0) + 1, m: ((s.cards[id] || {}).m || 0) + 1 } } });
 export const logSession = (s, kind, subj, n, ok) => ({ ...s, log: [...(s.log || []).slice(-79), { at: Date.now(), kind, subj, n, ok }] });
-export const mcFallback = (idea, pool) => {
-  const masked = idea.c && maskIdea(idea.d, idea.c);
-  const key = (p) => (masked ? p.c : p.t), right = masked ? idea.c : idea.t;
-  const cand = pool.filter((p) => p.id !== idea.id && key(p) && norm(key(p)) !== norm(right));
-  const others = [...shuffle(cand.filter((p) => p.subject === idea.subject)), ...shuffle(cand.filter((p) => p.subject !== idea.subject))].map(key).filter((v, i, a) => a.indexOf(v) === i).slice(0, 3); // same-subject look-alikes first
-  const c = [right, ...others];
-  ["None of these", "All of these", "Not enough information"].forEach((e) => { if (c.length < 4) c.push(e); });
-  const a = shuffle(c);
-  return { type: "mc", ref: [idea.id], q: masked ? `Fill in the blank: "${masked}"` : `Which term matches this? "${idea.d}"`, c: a, a: a.indexOf(right), w: `${idea.t}: ${idea.d}` };
-};
 export async function buildQuiz(ideas, onProgress) {
   const items = [], covered = new Set();
   const batchRun = async (batch) => {
@@ -210,6 +196,7 @@ export async function buildQuiz(ideas, onProgress) {
   ideas.filter((x) => !covered.has(x.id)).forEach((x) => { items.push(mcFallback(x, ideas)); covered.add(x.id); });
   return { items, covered: covered.size };
 }
+// "coach" is always suggested first; these follow it by how close the deadline is
 export const REC = { today: ["cards", "cloze"], week: ["teach", "quiz"], final: ["blurt", "exam"] };
 export const ALL_SCOPE = { period: "final", pick: [], topicPick: [], q: "", focus: null };
 export const runLabel = (sc) => (sc.q.trim() ? `\u201c${sc.q.trim()}\u201d` : sc.topicPick.length === 1 ? sc.topicPick[0] : sc.pick.length === 1 ? sc.pick[0] : sc.pick.length ? `${sc.pick.length} subjects` : "Everything");

@@ -2,7 +2,7 @@
 import { useEffect, useState } from "react";
 import { Check, Lock, Plus, ListChecks, BookOpen, Telescope } from "lucide-react";
 import { supabase, store, loadProfile } from "../lib/services.js";
-import { EMAIL_RE } from "../lib/constants.js";
+import { EMAIL_RE, APP_NAME } from "../lib/constants.js";
 import { LINK_NOTICE } from "../lib/helpers.js";
 import { Sound } from "../lib/sound.js";
 import { Button, Field, Banner, Chip, Dots, cx } from "./ui.jsx";
@@ -10,7 +10,7 @@ import { Button, Field, Banner, Chip, Dots, cx } from "./ui.jsx";
 export const joinCode = { value: "" };
 export const codeError = (m) => (/wrong class code/i.test(m || "") ? "That class code isn't right. Ask your teacher or a classmate for it." : null);
 
-export const Wordmark = ({ className }) => <span className={cx("wordmark", className)} aria-label="Homeroom">Homeroom<i aria-hidden="true" /></span>;
+export const Wordmark = ({ className }) => <span className={cx("wordmark", className)} aria-label={APP_NAME}>{APP_NAME}<i aria-hidden="true" /></span>;
 export const MadeBy = () => <p className="caption made-by">Made by Nathaniel Visaya</p>;
 
 // The frame for every signed-out screen: a calm cream page, the pitch on wide screens, the form in a card.

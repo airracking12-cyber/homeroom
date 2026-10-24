@@ -1,94 +1,32 @@
-# DESIGN.md
+# Homeroom design: the cozy dorm room
 
-Homeroom's design system. Warm, calm, editorial, and built for daily use: a cream canvas, one coral accent, a serif for display
-type, hairlines instead of shadows. Simple and uncluttered. Every colour, size and radius lives in `src/styles/tokens.css`;
-nothing else in the app contains a hex value (`tests/contrast.test.mjs` fails if one appears).
+Principle: **cozy at the edges, calm in the middle.** Decoration (string lights, lamp glow, corkboard, sticky notes, plants, wood) frames the screen. Study areas stay clean and readable. Decoration never sits behind or over text or controls.
 
-> **Where this came from.** The brief for v34 named a reference file, `design-claude.md`, as the look to follow. That file (and
-> an earlier `DESIGN.md`) was not in the upload, so these tokens were built from the colours, type rules and shapes described in
-> the brief itself. All values are in one file on purpose: if you compare against the original and something differs, change
-> `tokens.css` and run `npm test`. The contrast test will tell you whether a new value still passes.
+This replaces the v34 "calm" rules. The rules below are enforced by `tests/design.test.mjs` and `tests/contrast.test.mjs`.
 
-## Adapted, not copied
+## Tokens (src/styles/tokens.css is the only place a colour, size, radius, shadow or duration is defined)
+- **Palette:** warm creams (canvas, paper), wood browns (ink, borders, frames), muted sage (success, plants, calm washes), ONE accent: clay terracotta (`--accent-fill` for buttons and selected states, `--accent` for big shapes only). Night mode is the room with the lamp on: warm brown, never black.
+- **Type:** headings use Patrick Hand (rounded, handwritten feel, weight 400, `font-synthesis: none`), body uses Inter. Both are bundled by Vite, so they work offline once cached; the stacks fall back to system rounded faces.
+- **Radius** 12 control / 16 card / 24 large / pill. **Space** 4px base. **Shadows** three tokens: `--shadow-paper` (cards), `--shadow-note` (sticky notes), `--shadow-float` (fab, toast); sheets use `--overlay-shadow`.
+- **Accessibility:** text pairs are at least 4.5:1, large text and control boundaries at least 3:1, in light and night. `--faint`, `--wood-2`, `--cork`, `--sage` are decoration and never carry text. Touch targets are at least 44px. Focus is always a visible 2px ring; the lamp glow adds to it, never replaces it.
 
-The reference describes a marketing site; Homeroom is a daily-use app. So:
+## Motion (src/styles/motion.css)
+Four reusable animations, each defined once: `unpack` (boxes and sheets open), `pop-in` (items settle in, `--i` staggers), `stick` (sticky notes peel and attach, `--tilt` sets the resting angle), `glow` (lamp and focus). Plus one `celebrate` burst, drawn in a decorative band above the finish card's text.
+- Only `transform` and `opacity` animate. Glow is an opacity-animated layer, never an animated shadow or filter.
+- Every tap shows a pressed state within 100ms (`--dur-press: 60ms`), before any async work.
+- Reduced motion: every entrance becomes a 160ms fade; infinite effects stop.
 
-| Marketing site | Homeroom |
-| --- | --- |
-| 96px between sections | 24px on phones, 32px from 768px |
-| 24 to 32px card padding | 16px, 20px from 768px. Lists stay compact and scannable |
-| Display type up to 48px | 28px on phones, 40px on desktop |
-| Hero band, pricing, cookie banner, connector tile, footer | Not built. App components instead: task row, plan week card, lesson card, quiz card, tab bar, sidebar, empty state |
-| Brand mark | A plain Homeroom wordmark of our own (serif, with a coral dot) |
+## Furniture (src/styles/room.css)
+String lights live in the strip reserved at the top of the sticky bar (`--lights-h`). `.cork` is a frame; text sits only on the `.note` sticky notes pinned to it. `.wood` is a shelf edge. `.lamp` hosts the night-mode glow.
 
-## Colour
+## Room map (home screen, "your room")
+Track = corkboard and desk. Review = bookshelf (Notes are the shelf, Reviewers the binders, Study the lamp-lit desk). Prepare = wall calendar. Class = the doorway to the hallway. Settings = the dresser. Night mode = the lamp. Ask = your roommate.
 
-All pairs below are verified in light, dark and system-dark by `tests/contrast.test.mjs`.
+## Move-In Day (the first-run introduction): a short film about an unboxing
+Scene 1 is the opening shot, on its own black stage (`src/app/tour/Opening.jsx`, `stage.jsx`, `src/styles/cinema.css`, the `--cine-*` tokens). **Title card** ("Nathaniel Visaya presents / Homeroom / Move-In Day"; any tap skips it; reduced motion has none) → **a bare dorm room at night**, lit only by a cold moonbeam, with one taped box on the floor and subtitles in the lower third, letterbox bars (2.39:1 on wide screens, slim on a phone held upright) → **Open the box**: the tape tears, the flaps swing out, warm light spills, the camera pushes in → **the montage**: string lights unroll, then corkboard, bookshelf, lamp and plant fly out of the box into the room, which warms with each one, a pop sound on every landing → **Start unpacking**: the light fills the frame and the film dissolves into the real app, which furnishes itself behind it.
+Scenes 2 to 5 happen over the real app: a title cuts in ("Scene 2, Corkboard") while two black curtains part, a clapperboard slate claps shut on the card, the spotlight lands on the real element (found by `data-tour`), and the piece flies from the card to that element. The last scene has the student add real notes, then the string lights flare. Five scenes at most; skippable from the first frame (Skip tour, Esc); it remembers where you were; it never ends on a "done" screen.
+Rules (tests/tour.test.mjs, tests/design.test.mjs): the film's colours are tokens and every pair is readable on black; only `transform` and `opacity` ever move (no filter, no blur, no continuous scale of a big layer: the camera only scales in one-off transitions); the film's own keyframes live in `cinema.css` and are listed in the design test; two compositions of the stage (`wide`, `tall`) switch on aspect ratio so the box and every piece are in frame on any screen; the stage never sits under the subtitles (a two-row grid); reduced motion runs the same story in a fifth of the time with no title card; the whole opening, from pressing "Open the box" to the real room, is under nine seconds.
 
-| Token | Light | Dark | Use |
-| --- | --- | --- | --- |
-| `--canvas` | `#faf9f5` | `#1b1a17` | the page |
-| `--surface` | `#f3efe5` | `#252320` | cards |
-| `--surface-2` | `#ebe5d8` | `#302d28` | wells, hover wash, segmented tracks |
-| `--raised` | `#fffefb` | `#2a2824` | sheets and menus |
-| `--hairline` | `#e1d9ca` | `#3a3630` | decorative borders and dividers |
-| `--border` | `#8c877b` | `#8b857a` | borders you must see: inputs, checkboxes (3:1) |
-| `--ink` / `--body` / `--muted` | `#141413` / `#3d3d3a` / `#5c5a54` | `#f5f1e8` / `#d9d4c8` / `#b0aa9d` | text |
-| `--faint` | `#8e8b82` | `#6f6a60` | **decoration and disabled only, never small text** |
-| `--coral` | `#cc785c` | `#d9856a` | big shapes, the wordmark dot. Not text, and not on cards |
-| `--accent-fill` | `#a9583e` | `#d9856a` | every button with a label, selected states, progress |
-| `--accent-text` | `#9a4a31` | `#eaa690` | coral-coloured text |
-| `--ok`, `--warn`, `--bad`, `--info` | with `-wash` tints | | status, always with a word or icon |
+## Layout (every screen, every width)
+Phone (under 640): one column, the bottom bar, a floating add button. Tablet (640 to 1023): the icon rail, two columns where it helps. Laptop and up (1024+): the full sidebar and **two columns, never a stretched strip**: Room (corkboard 1.75fr + shelf and roommate, then four tiles), Track (list + a sticky "This week" rail from 1100), Review's Study (what is next + the study tool, from 1100), Class (seat map + whoever you are looking at), Settings (look, sound, class | help, account, about), Prepare (wizard + a short note). Every page's content starts at the same left edge as the header; nothing is centred away from it. The Room is the first item in the navigation, so home is always one tap away.
 
-Accessibility overrides that beat the reference file:
-- White on `#cc785c` is 3.3:1, so buttons use `--accent-fill` (white on it is 5.1:1).
-- `#8e8b82` on cream is 3.2:1, so it is never used for text. Secondary text is `--muted` (5.1:1 on canvas, 4.5+ on cards).
-- Hover, focus and pressed states are all visible (the reference says to skip hover; we do not).
-- Coral on a cream card is only 2.85:1, so rings, bars and selected icons on cards use `--accent-fill`.
-
-## Type
-
-- **Display:** EB Garamond (variable), weight 400, letter-spacing `-0.02em`, line-height 1.15. Never bold the serif: go bigger, not heavier. Never use the sans for display headings.
-- **Body and UI:** Inter (variable). Body 16px / 1.55, small 14px, caption 13px. 16px inputs stop iOS zooming in.
-- Both are self-hosted with `@fontsource-variable/*`, so they work offline. No Google Fonts link anywhere.
-- Scale: display 28 / 40, h2 22 / 26, h3 18, body 16, small 14, caption 13.
-- One small uppercase label (`.eyebrow`, 13px, tracked) is allowed for dates and step counters. No other all-caps.
-
-## Space and shape
-
-- 4px base: 4, 8, 12, 16, 20, 24, 32, 40, 56. Content is capped at 1200px.
-- Radius: 8 controls (buttons, inputs, tabs), 12 cards, 16 large containers and sheets, pill for badges and chips.
-- Depth comes from colour blocks and hairlines. A shadow is only for something that floats: the Add button, a toast, a sheet.
-
-## Components (all in `src/app/ui.jsx` and `src/styles/components.css`)
-
-Button (primary, secondary, ghost, danger; 40px, 44px on touch) · Chip · Segmented control (real radios) · Field · Card · Badge · Bar ·
-Ring · Banner · Empty state · Skeleton · Sheet (native `<dialog>`: bottom sheet on phones, side panel from 768px) · Toast with Undo ·
-Task row · Tab bar / rail / sidebar. Screens add: plan week card, lesson card, quiz card, flashcard, seat map.
-
-## Layout by device
-
-Mobile first, from 320px up.
-- **Phone:** top bar, bottom tab bar (5 destinations), one round Add button above it.
-- **Tablet (768px):** a slim left rail with labels, side-panel sheets.
-- **Desktop (1024px):** a sidebar with the wordmark, search field in the top bar.
-- **Ultrawide:** content stays at 1200px, centred; the top bar lines up with it.
-- Uses `dvh`/`svh` (never bare `100vh`), `env(safe-area-inset-*)`, `viewport-fit=cover`, and never blocks zoom. A phone held sideways gets a shorter bar.
-
-## Motion
-
-120 / 200 / 320ms, one easing curve. Used to confirm (a tick, a sheet arriving, lines of the intro appearing one after another),
-never to decorate. `prefers-reduced-motion` removes all of it, including the staggered delays.
-
-## Rules
-
-Do
-- Keep the cream canvas on every screen. One primary action per screen.
-- Use coral only for primary actions and selected states.
-- Give every control hover (on devices that hover), a visible focus ring and a pressed state, and a 44px target on touch.
-- Write short, human copy with a next step in every error.
-
-Don't
-- Use pure white, cool greys, blue accents or a fourth surface colour.
-- Put coral everywhere, use emoji as icons (icons are `lucide-react` only), or stack cards inside cards inside cards.
-- Add purple gradients, glow, blur glass (only the sticky bar blurs) or `transition: all`.

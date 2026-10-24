@@ -35,6 +35,8 @@ const notesDb = [
   N("n10", "English", "Chapter 7", "Chapter 7 summary", "ines", 1, "In chapter 7 the narrator discovers the letter. The central theme is trust and betrayal.", [I("Central theme", "Chapter 7 explores trust and betrayal.", "trust and betrayal", "fact"), I("Key event", "The narrator discovers the hidden letter.", "letter", "fact")]),
   N("n11", "Mathematics", "Quadratic equations", "Reviewer: Quadratic equations", "mika", 0.1, "Solving by factoring\nStandard form: ax^2 + bx + c = 0.\nZero product property: if a product is zero, at least one factor is zero.\n\nQuadratic formula\nx = (-b ± sqrt(b^2 - 4ac)) / 2a.\nThe discriminant tells how many real roots there are.", [], "ai"),
 ];
+try { const kept = JSON.parse(sessionStorage.getItem("mock:notes") || "null"); if (Array.isArray(kept)) { notesDb.length = 0; notesDb.push(...kept); } } catch { /* start from the sample notes */ }
+const keepNotes = () => { try { sessionStorage.setItem("mock:notes", JSON.stringify(notesDb)); } catch { /* ignore */ } };
 const ideasDb = () => notesDb.flatMap((n) => n._ideas.map((x, idx) => ({ note_id: n.id, idx, title: x.t, detail: x.d, keyword: x.c, kind: x.k, subject: n.subject, topic: n.topic, note_title: n.title })));
 const strip = (n) => { const { _ideas, body, ...r } = n; return r; };
 
@@ -64,9 +66,9 @@ function run(b) {
       const rows = notesDb.filter((n) => !inF || inF[2].includes(n.id));
       data = rows.map((n) => (b.cols && /body/.test(b.cols) ? { id: n.id, body: n.body } : strip(n)));
     } else if (b.op === "insert") {
-      const r = b.payload; notesDb.unshift({ ...r, owner: "u1", created_at: new Date().toISOString(), n: String(r.body || "").length, ideas_n: 0, ideas_src: null, _ideas: [] });
+      const r = b.payload; notesDb.unshift({ ...r, owner: "u1", created_at: new Date().toISOString(), n: String(r.body || "").length, ideas_n: 0, ideas_src: null, _ideas: [] }); keepNotes();
     } else if (b.op === "delete") { const i = notesDb.findIndex((n) => n.id === eq.id); if (i >= 0) notesDb.splice(i, 1); }
-    else if (b.op === "update") { const n = notesDb.find((x) => x.id === eq.id); if (n) Object.assign(n, b.payload); data = n ? [{ id: n.id }] : []; }
+    else if (b.op === "update") { const n = notesDb.find((x) => x.id === eq.id); if (n) Object.assign(n, b.payload); data = n ? [{ id: n.id }] : []; keepNotes(); }
   } else if (b.t === "note_ideas") {
     const inF = b.f.find((x) => x[0] === "in");
     data = ideasDb().filter((r) => !inF || inF[2].includes(r.note_id));
@@ -98,7 +100,7 @@ export const supabase = {
       const rows = ideasDb().filter((r) => (!args.p_subjects || args.p_subjects.includes(r.subject)) && (!args.p_topics || args.p_topics.includes(r.topic)) && (!w.length || (args.p_any ? w.some : w.every).call(w, (x) => `${r.title} ${r.detail} ${r.topic} ${r.note_title}`.toLowerCase().includes(x))));
       return { data: rows.slice(0, args.p_limit || 80), error: null };
     }
-    if (name === "save_note_ideas") { const n = notesDb.find((x) => x.id === args.p_note); if (n) { n._ideas = args.p_ideas; n.ideas_n = args.p_ideas.length; n.ideas_src = args.p_src; } return { data: args.p_ideas.length, error: null }; }
+    if (name === "save_note_ideas") { const n = notesDb.find((x) => x.id === args.p_note); if (n) { n._ideas = args.p_ideas; n.ideas_n = args.p_ideas.length; n.ideas_src = args.p_src; keepNotes(); } return { data: args.p_ideas.length, error: null }; }
     if (name === "search_notes") { const w = String(args.p_q || "").toLowerCase(); return { data: notesDb.filter((n) => `${n.title} ${n.body}`.toLowerCase().includes(w)).map((n) => ({ id: n.id, snippet: n.body.slice(0, 90) })), error: null }; }
     if (name === "class_roster") return { data: [{ username: "mika", seat: 1 }, { username: "ines", seat: 2 }, { username: "owen", seat: 3 }], error: null };
     return { data: null, error: null };

@@ -8,8 +8,11 @@ export const DESTINATIONS = [
   { id: "class", label: "Class", title: "Class", key: "c", blurb: "Your classmates, groups and the assistant" },
   { id: "settings", label: "Settings", title: "Settings", key: "s", blurb: "You, your class and how Homeroom looks" },
 ];
-export const DEFAULT_DEST = "track";
+// "Your room" is the home screen: the default landing, reached from the wordmark and "g h". It is not a sixth tab.
+export const ROOM = { id: "room", label: "Room", title: "Your room", key: "h", blurb: "Your room: every part of Homeroom, one tap away" };
+export const DEFAULT_DEST = "room";
 export const ids = () => DESTINATIONS.map((d) => d.id);
+export const routeIds = () => [ROOM.id, ...ids()];
 
 // Routes live in the hash ("#/review/notes") so Back works and a link can be shared. A hash that does not start with
 // "#/" (the sign-in links from email use it too) is not a route.
@@ -17,13 +20,13 @@ export function parseRoute(hash) {
   const h = String(hash || "");
   if (!h.startsWith("#/")) return { dest: DEFAULT_DEST, parts: [] };
   const parts = h.slice(2).split("?")[0].split("/").filter(Boolean).map((x) => { try { return decodeURIComponent(x); } catch { return x; } });
-  const dest = ids().includes(parts[0]) ? parts[0] : DEFAULT_DEST;
-  return { dest, parts: ids().includes(parts[0]) ? parts.slice(1) : [] };
+  const known = routeIds().includes(parts[0]);
+  return { dest: known ? parts[0] : DEFAULT_DEST, parts: known ? parts.slice(1) : [] };
 }
 export const hashFor = (dest, ...parts) => "#/" + [dest, ...parts].filter(Boolean).map(encodeURIComponent).join("/");
 
 // "g" then a letter jumps to a destination (kept from v33, letters now follow the new names)
-export const shortcutDest = (k) => DESTINATIONS.find((d) => d.key === String(k).toLowerCase())?.id || null;
+export const shortcutDest = (k) => [ROOM, ...DESTINATIONS].find((d) => d.key === String(k).toLowerCase())?.id || null;
 
 // Where every feature from the v33 inventory lives now. tests/nav.test.mjs checks that nothing is missing.
 export const FEATURE_HOME = {
@@ -34,7 +37,7 @@ export const FEATURE_HOME = {
   "Study techniques": "review", "Weekly plan": "review", "Reviewers": "review", "Weekly reviewer": "review", "Notes and reviewer uploads": "review",
   "Long term plans": "prepare", "Teach me this lessons": "prepare",
   "Seat map and presence": "class", "Temporary chat": "class",
-  "Appearance, sound, music": "settings", "Play introduction": "settings", "Change class": "settings", "Send feedback": "settings",
+  "Appearance, sound, music": "settings", "Replay Move-In Day": "settings", "Night mode lamp": "global", "Your room home": "room", "Change class": "settings", "Send feedback": "settings",
   "Download my data": "settings", "Sign out": "settings", "Delete account": "settings", "About / credit": "settings",
   "Admin: suggestions, classes, Minecraft": "admin",
 };

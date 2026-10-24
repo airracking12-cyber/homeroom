@@ -1,10 +1,12 @@
 // The frame around the signed-in app: top bar, navigation (tab bar, rail or sidebar by screen size), and the sheets every
 // destination shares (add a task, search, ask, shortcuts).
 import { useState, useEffect, useMemo, useCallback, useRef } from "react";
-import { ListChecks, BookOpen, Telescope, Users, Settings as SettingsIcon, Search, MessageCircle, WifiOff, Keyboard, RefreshCw } from "lucide-react";
+import { House, ListChecks, BookOpen, Telescope, Users, Settings as SettingsIcon, Search, MessageCircle, WifiOff, Keyboard, RefreshCw, LampDesk } from "lucide-react";
 import { useData } from "./data.jsx";
 import { ShellCtx } from "./shell-context.js";
-import { DESTINATIONS, shortcutDest } from "./nav.js";
+import { DESTINATIONS, ROOM, shortcutDest } from "./nav.js";
+import { useNight } from "./prefs.js";
+import Tour from "./tour/Tour.jsx";
 import { useFocusTimer, setTitleBase, useCabin } from "../lib/hooks.js";
 import { subjColor } from "../lib/constants.js";
 import { relLabel } from "../lib/dates.js";
@@ -18,7 +20,7 @@ import { TaskForm } from "./track/parts.jsx";
 import { useSearchHits } from "./track/parts.jsx";
 import Assistant from "./Assistant.jsx";
 
-const ICONS = { track: ListChecks, review: BookOpen, prepare: Telescope, class: Users, settings: SettingsIcon };
+const ICONS = { room: House, track: ListChecks, review: BookOpen, prepare: Telescope, class: Users, settings: SettingsIcon };
 const mac = typeof navigator !== "undefined" && /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent || "");
 
 export function SearchPanel({ tasks, materials, onTask, onMaterial }) {
@@ -56,7 +58,7 @@ export function SearchPanel({ tasks, materials, onTask, onMaterial }) {
 function ShortcutList() {
   const rows = [
     [[mac ? "\u2318" : "Ctrl", "K"], "Search everything"], [["/"], "Search, from anywhere"], [["n"], "Add a task"],
-    [["g", "t"], "Go to Track"], [["g", "r"], "Go to Review"], [["g", "p"], "Go to Prepare"], [["g", "c"], "Go to Class"], [["g", "s"], "Go to Settings"], [["g", "d"], "Show what you have finished"], [["g", "a"], "Ask the assistant"],
+    [["g", "h"], "Go to your room"], [["g", "t"], "Go to Track"], [["g", "r"], "Go to Review"], [["g", "p"], "Go to Prepare"], [["g", "c"], "Go to Class"], [["g", "s"], "Go to Settings"], [["g", "d"], "Show what you have finished"], [["g", "a"], "Ask the assistant"],
     [["j"], "Next task in the list"], [["k"], "Previous task in the list"], [["x"], "Mark the focused task done"], [["?"], "Show this list"], [["Esc"], "Close whatever is open"],
   ];
   return (
@@ -66,7 +68,7 @@ function ShortcutList() {
   );
 }
 
-export default function Shell({ route, go, back, children }) {
+export default function Shell({ route, go, back, children, appearance, tour, offer }) {
   const d = useData();
   const timer = useFocusTimer();
   const toast = useToast();
@@ -87,7 +89,10 @@ export default function Shell({ route, go, back, children }) {
   const [pendingScope, setPendingScope] = useState(null); // a study request from another destination (Prepare, Track)
   const [online, setOnline] = useState(() => (typeof navigator === "undefined" ? true : navigator.onLine));
   const gPending = useRef(0);
-  const current = DESTINATIONS.find((x) => x.id === route.dest) || DESTINATIONS[0];
+  const current = [ROOM, ...DESTINATIONS].find((x) => x.id === route.dest) || ROOM;
+  const night = useNight(appearance.theme);
+  const lamp = useMemo(() => ({ night, toggle: () => appearance.setTheme(night ? "light" : "dark") }), [night, appearance]);
+  const ownNotes = d.materials.filter((m) => m.by === d.user).length;
 
   useEffect(() => { setTitleBase(`${current.title} \u00b7 Homeroom`); }, [current.title]);
   useEffect(() => { const on = () => setOnline(true), off = () => setOnline(false); window.addEventListener("online", on); window.addEventListener("offline", off); return () => { window.removeEventListener("online", on); window.removeEventListener("offline", off); }; }, []);
@@ -110,6 +115,7 @@ export default function Shell({ route, go, back, children }) {
   // keyboard: n new task, / or Ctrl/Cmd+K search, ? help, "g" then a letter to go somewhere, j/k/x in lists
   useEffect(() => {
     const onKey = (e) => {
+      if (tour?.open && !document.querySelector("dialog[open]")) return; // the tour has the keyboard: Esc skips it
       if (e.metaKey || e.altKey) { if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") { e.preventDefault(); setSearchOpen(true); } return; }
       if (e.ctrlKey && e.key.toLowerCase() === "k") { e.preventDefault(); setSearchOpen(true); return; }
       const el = e.target;
@@ -140,9 +146,9 @@ export default function Shell({ route, go, back, children }) {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [go, openForm, d]);
+  }, [go, openForm, d, tour?.open]);
 
-  const ctx = useMemo(() => ({ route, go, back, openForm, openSearch: () => setSearchOpen(true), openAsk: () => setAskOpen(true), openHelp: () => setHelpOpen(true), timer, openReviewFor, startStudy, pendingScope, clearScope, cabin, openChat }), [route, go, back, openForm, timer, openReviewFor, startStudy, pendingScope, clearScope, cabin, openChat]);
+  const ctx = useMemo(() => ({ route, go, back, openForm, openSearch: () => setSearchOpen(true), openAsk: () => setAskOpen(true), openHelp: () => setHelpOpen(true), timer, openReviewFor, startStudy, pendingScope, clearScope, cabin, openChat, lamp, offer }), [route, go, back, openForm, timer, openReviewFor, startStudy, pendingScope, clearScope, cabin, openChat]);
 
   return (
     <ShellCtx.Provider value={ctx}>
@@ -150,11 +156,11 @@ export default function Shell({ route, go, back, children }) {
         <a className="skip" href="#main" onClick={(e) => { e.preventDefault(); document.getElementById("main")?.focus(); }}>Skip to content</a>
         {d.syncing && <div className="sync" role="progressbar" aria-label="Syncing" />}
         <nav className="nav" aria-label="Main">
-          <div className="nav-brand"><Wordmark /></div>
-          {DESTINATIONS.map((x) => {
+          <div className="nav-brand"><a className="home-link" href="#/room" title="Your room" onClick={(e) => { e.preventDefault(); go("room"); }}><Wordmark /></a></div>
+          {[ROOM, ...DESTINATIONS].map((x) => {
             const Icon = ICONS[x.id];
             return (
-              <a key={x.id} className="nav-item" href={`#/${x.id}`} aria-current={route.dest === x.id ? "page" : undefined} onClick={(e) => { e.preventDefault(); go(x.id); }}>
+              <a key={x.id} className="nav-item" data-tour={`nav-${x.id}`} href={`#/${x.id}`} aria-current={route.dest === x.id ? "page" : undefined} onClick={(e) => { e.preventDefault(); go(x.id); }}>
                 <Icon size={22} strokeWidth={route.dest === x.id ? 2.2 : 1.8} aria-hidden="true" /><span>{x.label}</span>
               </a>
             );
@@ -164,12 +170,13 @@ export default function Shell({ route, go, back, children }) {
         <div className="main">
           <header className="topbar">
             <div className="topbar-l">
-              <Wordmark className="only-narrow" />
+              <a className="home-link only-narrow" href="#/room" title="Your room" onClick={(e) => { e.preventDefault(); go("room"); }}><Wordmark /></a>
               {d.classLabel && <span className="badge class-pill" title="Your class">Class {d.classLabel}</span>}
             </div>
             <div className="topbar-r">
               <button type="button" className="search-pill" onClick={() => setSearchOpen(true)} aria-keyshortcuts={mac ? "Meta+K" : "Control+K"}><Search size={16} aria-hidden="true" />Search<kbd aria-hidden="true">{mac ? "\u2318K" : "Ctrl K"}</kbd></button>
               <Button variant="ghost" icon className="search-icon" onClick={() => setSearchOpen(true)} aria-label="Search tasks and notes"><Search size={20} /></Button>
+              <Button variant="ghost" icon className="lamp" data-tour="lamp" aria-pressed={night} aria-label="Night mode lamp" title={night ? "Lamp on: tap for day" : "Tap the lamp for night mode"} onClick={lamp.toggle}><LampDesk size={20} aria-hidden="true" /></Button>
               <Button variant="secondary" size="sm" onClick={() => setAskOpen(true)}><MessageCircle size={16} aria-hidden="true" /><span>Ask</span></Button>
               <Button variant="ghost" icon className="only-wide help-btn" onClick={() => setHelpOpen(true)} aria-label="Keyboard shortcuts"><Keyboard size={18} /></Button>
             </div>
@@ -192,6 +199,7 @@ export default function Shell({ route, go, back, children }) {
           {chat && <Chat key={chat} peer={chat} me={d.user} classId={d.classId} thread={threads.current[chat]} saveThread={(p, m) => { threads.current[p] = m; }} ring={cabin.ring} peerOnline={cabin.online.has(chat)} />}
         </Sheet>
         <Sheet open={helpOpen} onClose={() => setHelpOpen(false)} title="Keyboard shortcuts" modal>{helpOpen && <ShortcutList />}</Sheet>
+        {tour?.open && <Tour user={d.user} route={route} go={go} ownNotes={ownNotes} toast={toast} onClose={tour.onClose} />}
       </div>
     </ShellCtx.Provider>
   );

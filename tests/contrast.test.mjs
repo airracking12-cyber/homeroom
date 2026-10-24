@@ -24,17 +24,21 @@ const PAIRS = [
   ["muted", "canvas", TEXT, "secondary text on canvas"], ["muted", "surface", TEXT, "secondary text on cards"], ["muted", "surface-2", TEXT, "secondary text on wells"], ["muted", "raised", TEXT, "secondary text on sheets"],
   ["ink", "raised", TEXT, "text on sheets"], ["ink", "seg-on", TEXT, "picked option in a segmented control"], ["muted", "surface-2", TEXT, "unpicked option label on its track"], ["body", "raised", TEXT, "body on sheets"],
   ["on-accent", "accent-fill", TEXT, "button label"], ["on-accent", "accent-fill-hover", TEXT, "button label, hover"], ["on-accent", "accent-fill-press", TEXT, "button label, pressed"],
-  ["accent-text", "canvas", TEXT, "coral text on canvas"], ["accent-text", "surface", TEXT, "coral text on cards"], ["accent-text", "raised", TEXT, "coral text on sheets"],
-  ["on-accent-wash", "accent-wash", TEXT, "text on soft coral"], ["accent-text", "accent-wash", TEXT, "coral text on soft coral"],
+  ["accent-text", "canvas", TEXT, "accent text on canvas"], ["accent-text", "surface", TEXT, "accent text on cards"], ["accent-text", "raised", TEXT, "accent text on sheets"],
+  ["on-accent-wash", "accent-wash", TEXT, "text on soft accent"], ["accent-text", "accent-wash", TEXT, "accent text on soft accent"],
   ["ok", "canvas", TEXT, "success text"], ["ok", "surface", TEXT, "success text on cards"], ["ok", "ok-wash", TEXT, "success badge"],
   ["warn", "canvas", TEXT, "warning text"], ["warn", "surface", TEXT, "warning text on cards"], ["warn", "warn-wash", TEXT, "warning badge"],
   ["bad", "canvas", TEXT, "error text"], ["bad", "surface", TEXT, "error text on cards"], ["bad", "bad-wash", TEXT, "error badge"],
   ["info", "canvas", TEXT, "info text"], ["info", "info-wash", TEXT, "info badge"],
-  // non-text: control borders, focus ring, large coral shapes
+  // non-text: control borders, focus ring, large accent shapes
   ["border", "canvas", LARGE, "input border on canvas"], ["border", "surface", LARGE, "input border on cards"], ["border", "raised", LARGE, "input border on sheets"],
   ["focus", "canvas", LARGE, "focus ring on canvas"], ["focus", "surface", LARGE, "focus ring on cards"], ["focus", "raised", LARGE, "focus ring on sheets"],
-  ["coral", "canvas", LARGE, "decorative coral on canvas (the wordmark dot, intro art)"],
-  // coral is NOT 3:1 on a card, so progress rings, selected icons and bars on cards use the deeper fill instead
+  ["accent", "canvas", LARGE, "decorative accent on canvas (the wordmark dot, pins, tour art)"],
+  ["sage-ink", "canvas", TEXT, "sage text and icons on canvas"], ["sage-ink", "surface", TEXT, "sage text on cards"], ["sage-ink", "sage-wash", TEXT, "sage text on its wash"], ["sage-ink", "raised", TEXT, "sage text on sheets"],
+  ["ink", "wood-wash", TEXT, "text on a wood wash"], ["muted", "wood-wash", TEXT, "secondary text on a wood wash"],
+  ["on-note", "note-1", TEXT, "sticky note, butter"], ["on-note", "note-2", TEXT, "sticky note, sage"], ["on-note", "note-3", TEXT, "sticky note, blush"],
+  ["accent-fill", "wood-wash", LARGE, "selected states on a wood wash"], ["wood", "wood-wash", LARGE, "banner icons on the wood wash"], ["ink", "warn-wash", TEXT, "mismatch and missed-parts notes"], ["ink", "ok-wash", TEXT, "correct feedback"], ["ok", "ok-wash", TEXT, "key points you covered"],
+  // the bright accent is only for big decoration; progress rings, selected icons and bars use the deeper fill
   ["accent-fill", "canvas", LARGE, "progress and selected states on canvas"], ["accent-fill", "surface", LARGE, "progress and selected states on cards"], ["accent-fill", "raised", LARGE, "selected states on sheets"],
 ];
 
@@ -54,10 +58,10 @@ test("the system-dark block and the forced-dark block hold the same colours", ()
   for (const k of Object.keys(DARK)) assert.equal(DARK_MEDIA[k], DARK[k], `--${k} differs between the two dark blocks`);
 });
 
-test("the brief's own accessibility overrides hold", () => {
-  assert.ok(ratio("#ffffff", "#cc785c") < 4.5, "white on #cc785c really is too faint, which is why buttons use --accent-fill");
+test("the accessibility overrides hold", () => {
+  assert.ok(ratio(LIGHT["on-accent"], LIGHT.accent) < 4.5, "the bright accent is too faint for button text, which is why buttons use --accent-fill");
   assert.ok(ratio(LIGHT["on-accent"], LIGHT["accent-fill"]) >= 4.5);
-  assert.ok(ratio("#8e8b82", LIGHT.canvas) < 4.5, "#8e8b82 is for decoration only");
+  assert.ok(ratio(LIGHT.faint, LIGHT.canvas) < 4.5, "--faint is for decoration only");
   assert.ok(ratio(LIGHT.muted, LIGHT.surface) >= 4.5, "muted text must read on a card");
 });
 

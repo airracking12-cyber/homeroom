@@ -6,10 +6,12 @@ import { useShell } from "../shell-context.js";
 import { useMedia } from "../../lib/hooks.js";
 import { subjColor, QUARTERS } from "../../lib/constants.js";
 import { todayISO, addDays, diffDays, weekStartOf } from "../../lib/dates.js";
+import { nice } from "../../lib/helpers.js";
 import { Button, Chip, Segmented, Banner, Empty, Skeleton, Sheet, Ring, Bar, cx } from "../ui.jsx";
 import { TaskRow, TaskForm, TaskDetail, CalendarView, BoardView, PlanTonight, FocusPanel } from "./parts.jsx";
 
 const PRIO = { High: 0, Medium: 1, Low: 2 };
+const FOLD = 6;                       // a group longer than this shows five rows and a "Show more"
 const greeting = () => { const h = new Date().getHours(); return h < 12 ? "Good morning" : h < 18 ? "Good afternoon" : "Good evening"; };
 
 export default function Track() {
@@ -85,6 +87,7 @@ export default function Track() {
   const closeDetail = () => back("track");
 
   const summary = today + overdue === 0 ? "Nothing urgent right now." : `${today} due today${overdue ? `, ${overdue} overdue` : ""}.`;
+  const [unfolded, setUnfolded] = useState({});
   const changeMode = (m) => setUi((u) => ({ ...u, mode: m }));
   const showCal = view === "open" && mode === "calendar";
   const modeOpts = [["list", "List"], ["calendar", "Calendar"], ...(phone ? [] : [["board", "Board"]])];
@@ -94,7 +97,7 @@ export default function Track() {
       <header className="page-head">
         <div>
           <p className="eyebrow">{new Date().toLocaleDateString(undefined, { weekday: "long", month: "long", day: "numeric" })}{d.classLabel && <span className="only-xs"> &middot; Class {d.classLabel}</span>}</p>
-          <h1>{greeting()}, {user}.</h1>
+          <h1>{greeting()}, {nice(user)}.</h1>
           <p className="lede">{summary}{week > 0 ? ` ${week} due in the next 7 days.` : ""}</p>
         </div>
         <Button variant="primary" size="lg" className="only-wide" onClick={() => openForm()}><Plus size={18} aria-hidden="true" />Add task</Button>
@@ -104,18 +107,22 @@ export default function Track() {
         {ann && <Banner tone="accent" icon={Megaphone} onClose={() => d.dismissAnn(ann.id)}><b>From your admin</b><span>{ann.text}</span></Banner>}
         {wkBanner && !hideWk && <Banner icon={ClipboardCheck} onClose={() => setHideWk(true)} action={<Button size="sm" onClick={() => go("review", "reviewers", wkBanner.w)}>Open weekly reviewer</Button>}>{wkBanner.text}</Banner>}
 
-        <section className="card week-card" aria-label="This week">
-          <Ring pct={wkPct} size={phone ? 64 : 76}><span className="ring-n">{Math.round(wkPct * 100)}%</span></Ring>
-          <div className="week-text">
-            <h2>This week</h2>
-            <p className="muted">{wkTasks.length === 0 ? "Nothing is due this week yet." : `${wkDone} of ${wkTasks.length} done`}</p>
-            <p className={cx("streak", !streak && "quiet")}><Flame size={15} aria-hidden="true" />{streak ? `${streak}-day streak` : "Finish a task to start a streak"}</p>
-            <div className="week-links">
-              <Button variant="ghost" size="sm" onClick={() => setPlanOpen(true)}><Sparkles size={15} aria-hidden="true" />Plan tonight</Button>
-              <Button variant="ghost" size="sm" onClick={() => setFocusOpen(true)}><Timer size={15} aria-hidden="true" />Focus timer{timer.running ? ` · ${String(Math.floor(timer.left / 60)).padStart(2, "0")}:${String(timer.left % 60).padStart(2, "0")}` : ""}</Button>
-            </div>
-          </div>
-        </section>
+        <div className="track-layout">
+          <aside className="track-rail">
+            <section className="card week-card" aria-label="This week">
+              <Ring pct={wkPct} size={phone ? 64 : 76}><span className="ring-n">{Math.round(wkPct * 100)}%</span></Ring>
+              <div className="week-text">
+                <h2>This week</h2>
+                <p className="muted">{wkTasks.length === 0 ? "Nothing is due this week yet." : `${wkDone} of ${wkTasks.length} done`}</p>
+                <p className={cx("streak", !streak && "quiet")}><Flame size={15} aria-hidden="true" />{streak ? `${streak}-day streak` : "Finish a task to start a streak"}</p>
+              </div>
+              <div className="week-links">
+                <Button variant="secondary" size="sm" onClick={() => setPlanOpen(true)}><Sparkles size={15} aria-hidden="true" />Plan tonight</Button>
+                <Button variant="secondary" size="sm" onClick={() => setFocusOpen(true)}><Timer size={15} aria-hidden="true" />Focus timer{timer.running ? ` · ${String(Math.floor(timer.left / 60)).padStart(2, "0")}:${String(timer.left % 60).padStart(2, "0")}` : ""}</Button>
+              </div>
+            </section>
+          </aside>
+          <div className="stack track-main">
 
         <div className="toolbar">
           <Segmented label="Show" value={view} options={[["open", "To do"], ["done", "Done"]]} onChange={(v) => setUi((u) => ({ ...u, view: v }))} />
@@ -146,18 +153,22 @@ export default function Track() {
         {!d.loading && view === "open" && mode === "list" && (
           sections.length === 0 ? (
             tasks.length === 0 ? (
-              <Empty icon={ListChecks} title="Nothing on the list yet" action={<Button variant="primary" onClick={() => openForm()}><Plus size={16} aria-hidden="true" />Add the first task</Button>}>Add a homework or deadline and your whole class will see it.</Empty>
+              <Empty icon={ListChecks} title="Your corkboard is bare" action={<Button variant="primary" onClick={() => openForm()}><Plus size={16} aria-hidden="true" />Pin the first task</Button>}>Pin a homework or deadline and your whole class will see it, too.</Empty>
             ) : activeFilters > 0 || subj !== "All" ? (
               <Empty icon={SlidersHorizontal} title="Nothing matches these filters" action={<Button onClick={() => setUi((u) => ({ ...u, q: "All", kind: "All", group: "date", subj: "All" }))}>Show everything</Button>}>Try a different subject or clear the filters.</Empty>
             ) : (
-              <Empty icon={CheckCheck} title="You\u2019re all caught up" action={<Button onClick={() => openForm()}><Plus size={16} aria-hidden="true" />Add a task</Button>}>Nothing is waiting for you. Enjoy it, or get ahead in Review.</Empty>
+              <Empty icon={CheckCheck} title="You\u2019re all caught up" action={<Button onClick={() => openForm()}><Plus size={16} aria-hidden="true" />Add a task</Button>}>Nothing is waiting on the corkboard. Enjoy the quiet, or get ahead in Review.</Empty>
             )
-          ) : sections.map((g) => (
-            <section key={g.key} className="group" aria-label={g.key}>
-              <h2 className={cx("group-h", g.tone)}>{g.key}<span className="badge">{g.items.length}</span>{g.sub && <span className="caption">{g.sub}</span>}</h2>
-              <div className="card card-flat divided">{g.items.map((t) => <TaskRow key={t.id} t={t} status={st(t)} finished={fin(t)} groupName={ui.group === "group" ? null : groupById[t.groupId]?.name} onOpen={() => openTask(t.id)} onToggle={() => toggle(t)} />)}</div>
-            </section>
-          ))
+          ) : sections.map((g) => {
+            const long = g.items.length > FOLD, folded = long && !unfolded[g.key], shown = folded ? g.items.slice(0, FOLD - 1) : g.items;
+            return (
+              <section key={g.key} className="group" aria-label={g.key}>
+                <h2 className={cx("group-h", g.tone)}>{g.key}<span className="badge">{g.items.length}</span>{g.sub && <span className="caption">{g.sub}</span>}</h2>
+                <div className="card card-flat divided">{shown.map((t) => <TaskRow key={t.id} t={t} status={st(t)} finished={fin(t)} groupName={ui.group === "group" ? null : groupById[t.groupId]?.name} onOpen={() => openTask(t.id)} onToggle={() => toggle(t)} />)}</div>
+                {long && <Button variant="ghost" size="sm" className="fold-btn" aria-expanded={!folded} onClick={() => setUnfolded((u) => ({ ...u, [g.key]: !u[g.key] }))}>{folded ? `Show ${g.items.length - shown.length} more` : "Show fewer"}</Button>}
+              </section>
+            );
+          })
         )}
 
         {!d.loading && view === "open" && mode === "board" && <BoardView items={base} status={st} finished={fin} groupById={groupById} setStatus={setStatusKeep} openTask={openTask} />}
@@ -174,7 +185,7 @@ export default function Track() {
                 <Bar value={pct} label="Share of tasks done" />
                 <p className="muted small">{scope.length === 0 ? "Nothing has been added yet." : doneList.length === scope.length ? "Every task is done. Nicely finished." : `${scope.length - doneList.length} still to go.`}</p>
               </section>
-              {doneList.length === 0 ? <Empty icon={CheckCheck} title="Nothing finished yet">Tick a task off and it will wait for you here.</Empty> : subjectsDone.map((sj) => {
+              {doneList.length === 0 ? <Empty icon={CheckCheck} title="No finished tasks yet">Tick one off and it lands here, like a note you took down from the board.</Empty> : subjectsDone.map((sj) => {
                 const list = doneList.filter((t) => t.subject === sj);
                 return (
                   <section key={sj} className="group" aria-label={sj}>
@@ -186,6 +197,8 @@ export default function Track() {
             </>
           );
         })()}
+          </div>
+        </div>
       </div>
 
       <button type="button" className="fab only-narrow" onClick={() => openForm()}><Plus size={22} aria-hidden="true" /><span className="fab-label">Add task</span></button>

@@ -6,8 +6,8 @@ import { supabase, store, notes } from "../lib/services.js";
 import { todayISO, toISO, diffDays, addDays } from "../lib/dates.js";
 import { uid } from "../lib/helpers.js";
 import { SUBJ, SUBJ_REG, subjColor, DEFAULT_SUBJECTS } from "../lib/constants.js";
-import { normTopic, MAX_BODY } from "../lib/notes.js";
-import { ensureInventory } from "../lib/study.js";
+import { normTopic, topicList, MAX_BODY } from "../lib/notes.js";
+import { useIngest } from "./ingest.jsx";
 import { createWriteQueue } from "../lib/writes.js";
 import { calcStreak } from "../lib/hooks.js";
 import { Sound } from "../lib/sound.js";
@@ -155,7 +155,7 @@ export function DataProvider({ user, classId, setClassId, classes, setClasses, i
     const task = tasksRef.current.find((t) => t.id === id);
     mutate("tasks", setTasks, (c) => c.filter((x) => x.id !== id));
     Sound.play("rip");
-    if (task) toast("Task deleted", { undo: () => addTask(task) });
+    if (task) toast("Task taken down", { undo: () => addTask(task) });
   }, [mutate, toast, addTask]);
 
   const addGroup = useCallback((g) => mutate("groups", setGroups, (c) => [...c, g]), [mutate]);
@@ -187,11 +187,15 @@ export function DataProvider({ user, classId, setClassId, classes, setClasses, i
 
   /* ----- notes (their own tables, see lib/notes.js) ----- */
   const markInventory = useCallback((id, entry) => setMaterials((c) => c.map((m) => (m.id === id ? { ...m, ic: entry.ideas.length, src: entry.src } : m))), []);
-  const addNote = useCallback(async (n) => {
+  const ingestRef = useRef(null); // the notes reader (app/ingest.jsx), set below
+  // The RAW save: the note exactly as given, before anything reads it. Text longer than one note can hold is never cut here
+  // (the reader splits it into numbered parts first), so this refuses it instead of losing the end.
+  const saveNote = useCallback(async (n) => {
     const id = n.id || uid();
     const subject = (n.subject || "").trim() || "General";
     const topic = normTopic(n.topic);
-    const text = String(n.text || "").slice(0, MAX_BODY);
+    const text = String(n.text || "");
+    if (text.length > MAX_BODY) return false;
     let file = n.file || null;
     if (!file && n.fileObj) { if (n.onProgress) n.onProgress("Keeping the original"); file = await notes.uploadFile(classRef.current, id, n.fileObj); }
     const ok = await notes.add({ id, classId: classRef.current, author: user, subject, topic, title: n.title, text, kind: n.kind || "upload", taskId: n.taskId, taskTitle: n.taskTitle, file });
@@ -199,19 +203,26 @@ export function DataProvider({ user, classId, setClassId, classes, setClasses, i
     ensureSubject(subject);
     const meta = { id, file, taskId: n.taskId || null, title: String(n.title || "Untitled notes").slice(0, 120), by: user, kind: n.kind || "upload", at: Date.now(), subject, topic, taskTitle: n.taskTitle || "", n: text.length, ic: 0, src: null, mine: true, orphan: false };
     setMaterials((c) => [meta, ...c.filter((x) => x.id !== id)]);
-    if (meta.kind !== "ai") {
-      Sound.play("add");
-      if (n.onProgress) n.onProgress("Reading your notes");
-      try { await ensureInventory([{ m: meta, subject }], markInventory, null, null); } catch { /* saved; it is read the first time someone studies it */ }
-    }
+    Sound.play("add");
     return true;
-  }, [user, ensureSubject, markInventory]);
+  }, [user, ensureSubject]);
+  // Saves a note, then reads it into the class's shared study ideas in the background (chunk by chunk, resumable).
+  const addNote = useCallback(async (n) => {
+    const id = n.id || uid();
+    const ok = await saveNote({ ...n, id });
+    if (ok && (n.kind || "upload") !== "ai") ingestRef.current?.startIdeas?.({ noteId: id, title: String(n.title || "Untitled notes").slice(0, 120), subject: (n.subject || "").trim() || "General", topic: normTopic(n.topic), text: String(n.text || ""), noteKind: n.kind || "upload", taskId: n.taskId, taskTitle: n.taskTitle });
+    return ok;
+  }, [saveNote]);
   const relabelMaterial = useCallback(async (id, patch) => {
     const ok = await notes.relabel(id, patch);
     if (ok) { ensureSubject(patch.subject); setMaterials((c) => c.map((m) => (m.id === id ? { ...m, ...patch, topic: normTopic(patch.topic) } : m))); }
     return ok;
   }, [ensureSubject]);
   const materialsRef = useRef(materials); materialsRef.current = materials;
+  const topicNames = useCallback((subject) => topicList(materialsRef.current, subject ? [subject] : []).map((x) => x.topic), []);
+  const noteInfo = useCallback((id) => materialsRef.current.find((m) => m.id === id), []);
+  const ingest = useIngest({ user, classRef, saveNote, markInventory, relabel: relabelMaterial, topicNames, noteInfo, toast });
+  ingestRef.current = ingest;
   const removeMaterial = useCallback(async (id) => {
     const m = materialsRef.current.find((x) => x.id === id);
     if (!m) return;
@@ -302,7 +313,7 @@ export function DataProvider({ user, classId, setClassId, classes, setClasses, i
     ui: prefs.ui, setUi, dismissAnn, loading, syncing, syncErr: failedCount > 0, retrying, retryFailed, reportSave, refresh, loadShared, resetShared,
     addTask, updateTask, deleteTask, setStatus, addGroup, saveGroup, deleteGroup, joinGroup, setSubject, ensureSubject,
     saveWeekly, addComment, removeComment, postAnn, removeAnn,
-    addNote, relabelMaterial, removeMaterial, markInventory, sendFeedback,
+    addNote, relabelMaterial, removeMaterial, markInventory, sendFeedback, ingest,
     toDays: diffDays, today: todayISO, toISO, addDays,
   };
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;

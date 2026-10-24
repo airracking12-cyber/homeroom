@@ -53,3 +53,23 @@ A4. If requirements conflict, this is the priority order: (1) never lose user da
 4.7 Sessions autosave, so quitting mid-session never loses answers.
 
 <!-- New instructions from the user are appended below this line, verbatim, numbered E1, E2, ... (B2). -->
+
+### E1 (user, after the first reply; answers to Q1 to Q7 plus new rules)
+
+ignore design.md
+ok just make nathaniels credit in the begining then
+make it so that the ai is only used for the database and when making reviers the whole class is one big shared reviewer and its a first come first serve basis 
+
+1. the whole review tab
+w. yes you may
+3.shatever you decide is better
+4. sure add that
+5.the first
+6.sure add that
+7. sure
+
+now go i do not care how big the file size is so it is quality over size here
+
+### E2 (user, after stage 4 was built)
+
+continue (also completely redo the introduction since the one right now from stage 3 is super plain leave NOTHING about the introdction behind and also please remember i want it to feel like new beginings type stuff like unboxing for your dorm)

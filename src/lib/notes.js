@@ -121,7 +121,8 @@ export function createNotes(supabase) {
     // storage). If the database hasn't had the v30 upgrade yet, the note is still saved, just without the file link and
     // (for a student-made reviewer) as an ordinary upload.
     async add(n) {
-      const body = String(n.text || "").slice(0, MAX_BODY);
+      const body = String(n.text || "");
+      if (body.length > MAX_BODY) return false; // never cut a note silently: the reader splits long text into numbered parts before it gets here
       const row = {
         id: n.id, class_id: n.classId, author: n.author, subject: n.subject, topic: normTopic(n.topic) || null,
         title: String(n.title || "Untitled notes").slice(0, 120), body, kind: n.kind || "upload",

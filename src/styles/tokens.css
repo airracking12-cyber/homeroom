@@ -1,26 +1,32 @@
-/* Homeroom design tokens. Every colour, size and radius in the app comes from here: no hex anywhere else.
-   Look: warm cream canvas, serif display at weight 400, hairline borders instead of shadows, one coral accent.
-   Accessibility rules baked in (see DESIGN.md): coral is a fill for large shapes and icons; buttons with text use
-   --accent-fill (white text, 5:1); small text never uses --faint; every text pair is checked by tests/contrast.test.mjs. */
+/* Homeroom design tokens: the cozy dorm room.
+   Principle: cozy at the edges, calm in the middle. Colour, type, space, radius, shadow and motion are defined ONCE here;
+   components use these tokens and never a raw value (tests/design.test.mjs and tests/contrast.test.mjs enforce it).
 
-@import "@fontsource-variable/eb-garamond/index.css";
+   Palette: warm creams (canvas and paper), wood browns (ink, borders, frames), muted sage (success, plants, calm washes)
+   and ONE accent, clay terracotta (primary buttons, selected states, focus). Light mode is the room by day; dark mode is the
+   room at night with the lamp on (warm brown, never black).
+   Accessibility baked in: text pairs are >= 4.5:1, large text and control boundaries >= 3:1, in both modes, checked by
+   tests/contrast.test.mjs. --faint, --wood-2 and --cork are decoration only and never carry text. */
+
+@import "@fontsource/patrick-hand/index.css";
 @import "@fontsource-variable/inter/index.css";
 
 :root {
   color-scheme: light dark;
 
-  /* ── type ── */
-  --font-display: "EB Garamond Variable", "EB Garamond", "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif;
+  /* ── type: rounded handwritten-feel headings, clean body. Both are bundled (self-hosted), so offline they still load once
+        cached, and if a font ever fails the stacks below fall back to friendly system faces. ── */
+  --font-display: "Patrick Hand", "Segoe Print", "Bradley Hand", "Chalkboard SE", ui-rounded, "Trebuchet MS", system-ui, sans-serif;
   --font-body: "Inter Variable", Inter, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
-  --fs-display: 28px;   /* phones; 40px from 1024px */
-  --fs-h2: 22px;
+  --fs-display: 34px;   /* phones; 46px from 1024px. Patrick Hand has a small x-height, so it runs a size up */
+  --fs-h2: 26px;
   --fs-h3: 18px;
   --fs-body: 16px;      /* 16px also stops iOS zooming into inputs */
   --fs-small: 14px;
   --fs-caption: 13px;
   --lh-tight: 1.15;
   --lh-body: 1.55;
-  --track-display: -0.02em;
+  --track-display: 0.005em;
 
   /* ── space (4px base) ── */
   --s-1: 4px; --s-2: 8px; --s-3: 12px; --s-4: 16px; --s-5: 20px; --s-6: 24px; --s-7: 32px; --s-8: 40px; --s-9: 56px;
@@ -28,82 +34,145 @@
   --pad-card: 16px;     /* 20px from 768px */
   --gutter: 16px;       /* page side padding; grows with width */
 
-  /* ── radius ── */
-  --r-control: 8px; --r-card: 12px; --r-large: 16px; --r-pill: 999px;
+  /* ── radius: soft, like rounded furniture ── */
+  --r-control: 12px; --r-card: 16px; --r-large: 24px; --r-pill: 999px;
 
-  /* ── motion ── */
-  --dur-1: 120ms; --dur-2: 200ms; --dur-3: 320ms;
+  /* ── motion: durations, easings and the press response (a tap shows a pressed state within 100ms) ── */
+  --dur-press: 60ms; --dur-1: 120ms; --dur-2: 220ms; --dur-3: 360ms; --dur-4: 560ms;
   --ease: cubic-bezier(0.2, 0.7, 0.2, 1);
+  --ease-settle: cubic-bezier(0.3, 1.3, 0.5, 1);   /* a soft overshoot: things settle into place */
 
   /* ── sizes ── */
   --touch: 44px;        /* minimum tap target */
   --content-max: 1200px;
   --nav-h: 64px;        /* phone tab bar, before the safe-area inset */
   --rail-w: 76px; --side-w: 232px;
+  --lights-h: 18px;     /* the string-lights strip at the top edge */
 
-  /* ── colour: light ── */
-  --canvas: #faf9f5;
-  --surface: #f3efe5;          /* cards */
-  --surface-2: #ebe5d8;        /* wells, hover wash, inset */
-  --raised: #fffefb;           /* menus and sheets sit a touch above the canvas */
-  --seg-on: #fffefb;           /* the picked option in a segmented control: lighter than its track */
-  --hairline: #e1d9ca;         /* decorative borders (cards, dividers) */
-  --border: #8c877b;           /* borders a person needs to see: inputs, checkboxes (3:1) */
-  --ink: #141413;
-  --body: #3d3d3a;
-  --muted: #5c5a54;
-  --faint: #8e8b82;            /* decoration and disabled only, never small text */
+  /* ── colour: light (the room by day) ── */
+  --canvas: #f8f1e3;           /* the wall: warm cream */
+  --surface: #f1e8d3;          /* cards: paper */
+  --surface-2: #e6d9bd;        /* wells, hover wash, inset */
+  --raised: #fffaf0;           /* menus and sheets sit a touch above the canvas */
+  --seg-on: #fffaf0;           /* the picked option in a segmented control: lighter than its track */
+  --hairline: #dccfb3;         /* decorative borders (cards, dividers) */
+  --border: #8a7560;           /* borders a person needs to see: inputs, checkboxes (3:1) */
+  --ink: #2a1e13;              /* wood-dark: headings */
+  --body: #45372a;
+  --muted: #64533f;
+  --faint: #9c8a72;            /* decoration and disabled only, never small text */
 
-  --coral: #cc785c;            /* big shapes, icons, rings. Not for small text */
-  --accent-fill: #a9583e;      /* buttons with text, selected states */
-  --accent-fill-hover: #8f4730;
-  --accent-fill-press: #7a3c27;
-  --on-accent: #ffffff;
-  --accent-text: #9a4a31;      /* coral-coloured text, readable on canvas and cards */
-  --accent-wash: #f6e4dc;      /* soft coral background */
-  --on-accent-wash: #6e321f;
-  --focus: #8f4730;
+  --accent: #c26a45;           /* big shapes, icons, rings, pins. Not for small text */
+  --accent-fill: #a24f2c;      /* buttons with text, selected states */
+  --accent-fill-hover: #873f21;
+  --accent-fill-press: #733419;
+  --accent-edge: #6f3118;      /* the bottom lip of a button: a little sticker thickness */
+  --on-accent: #fffaf0;
+  --accent-text: #8d4122;      /* accent-coloured text, readable on canvas and cards */
+  --accent-wash: #f2dac9;      /* soft accent background */
+  --on-accent-wash: #5e2d18;
+  --focus: #7a3a1d;
 
-  --ok: #2f6a42;     --ok-wash: #e1efe3;
-  --warn: #7d5200;   --warn-wash: #f6ead0;
+  /* wood and sage: the room's materials (decoration, frames, plants, calm states) */
+  --wood: #7b5434;             /* frames, the shelf edge, the lamp base */
+  --wood-2: #a67c52;           /* lighter wood grain. Decoration only */
+  --wood-wash: #ead9bf;
+  --sage: #7a9171;             /* leaves and calm shapes. Decoration only */
+  --sage-ink: #3f5b3c;         /* sage you can read (text, icons) */
+  --sage-wash: #e0e8d1;
+
+  --ok: #3a6a3a;     --ok-wash: #e0e8d1;
+  --warn: #7a5200;   --warn-wash: #f6e8c7;
   --bad: #a3302a;    --bad-wash: #f8e0dc;
   --info: #2c5b86;   --info-wash: #dfeaf4;
 
-  --scrim: rgba(20, 20, 19, 0.45);
-  --overlay-shadow: 0 12px 40px rgba(20, 20, 19, 0.16);
+  /* sticky notes: always paper-light with dark ink, in both modes */
+  --note-1: #f7e5a6; --note-2: #d3dfc3; --note-3: #f1d3c4; --on-note: #2a1e13;
+  /* corkboard and string lights (decoration frames the screen, never sits behind text) */
+  --cork: #c9a074; --cork-2: #b68a5d;
+  --bulb-a: #f2b45a; --bulb-b: #fff0cf; --wire: #8a7560;
+  --kraft: #c9a56f; --kraft-2: #b48b57; --kraft-3: #8f6a3c; --tape: #ead9b0;   /* the moving box: decoration only */
+
+  /* the film: Move-In Day opens as a night scene (cold moonlight, then warm lamplight), in both light and night mode */
+  --cine-0: #120c08;             /* black of the film: letterbox bars and title cards */
+  --cine-wall: #2b2530;          /* the bare wall, lit only by the moon */
+  --cine-wall-2: #211c26;
+  --cine-floor: #3a2a1f;
+  --cine-floor-2: #2e2118;
+  --cine-moon: #aac4e8;          /* moonlight: cold */
+  --cine-sky: #1a2236;
+  --cine-warm: #ffbe6e;          /* the box's light and the lamp: warm */
+  --cine-warm-2: #fff0cf;
+  --cine-text: #fbf1de;          /* text on the film: 15:1 on --cine-0 */
+  --cine-text-2: #d9c9ae;        /* quieter text on the film: 10:1 on --cine-0 */
+  --cine-glow: rgba(255, 190, 110, 0.55);
+  --cine-moon-glow: rgba(170, 196, 232, 0.28);
+  --cine-dim: rgba(18, 12, 8, 0.72);
+  --cine-vignette: rgba(18, 12, 8, 0.62);
+  --cine-bar: clamp(28px, calc((100dvh - 100vw / 2.39) / 2), 8dvh);   /* 2.39:1 letterbox on wide screens */
+
+  --scrim: rgba(42, 30, 19, 0.5);
+  --shadow-edge: rgba(74, 48, 26, 0.2);
+  --shadow-soft: rgba(74, 48, 26, 0.14);
+  --lamp-glow: rgba(255, 190, 110, 0.3);        /* the lamp's light as an opacity layer, never an animated shadow */
+  --lamp-glow-strong: rgba(255, 190, 110, 0.5);
+
+  /* ── shadows: three, defined once. Cards get a paper edge, things that float get lift ── */
+  --shadow-paper: 0 1px 0 var(--shadow-edge);
+  --shadow-note: 0 1px 1px var(--shadow-edge), 0 6px 12px var(--shadow-soft);
+  --shadow-float: 0 2px 0 var(--shadow-edge), 0 10px 28px var(--shadow-soft);
+  --overlay-shadow: 0 12px 40px var(--shadow-soft);
+  --shadow-inset: inset 0 0 0 1px var(--shadow-edge);
 }
 
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) { --dark: 1; }
 }
 
-/* dark values: applied when the system is dark (and not forced light) or when forced dark */
+/* dark values (the room at night, lamp on): applied when the system is dark (and not forced light) or when forced dark */
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
-    --canvas: #1b1a17; --surface: #252320; --surface-2: #302d28; --raised: #2a2824; --seg-on: #45413a;
-    --hairline: #3a3630; --border: #8b857a;
-    --ink: #f5f1e8; --body: #d9d4c8; --muted: #b0aa9d; --faint: #6f6a60;
-    --coral: #d9856a; --accent-fill: #d9856a; --accent-fill-hover: #e49b83; --accent-fill-press: #c9735a;
-    --on-accent: #1b1a17; --accent-text: #eaa690; --accent-wash: #3b2a23; --on-accent-wash: #f3c9b9; --focus: #f0b49b;
-    --ok: #86c797; --ok-wash: #22332a; --warn: #e0b765; --warn-wash: #372d17; --bad: #f09a92; --bad-wash: #3b2421; --info: #8fbbe6; --info-wash: #1f2e3b;
-    --scrim: rgba(0, 0, 0, 0.6); --overlay-shadow: 0 12px 40px rgba(0, 0, 0, 0.5);
+    --canvas: #1e1712; --surface: #2a2019; --surface-2: #36291f; --raised: #30251c; --seg-on: #4a3b2d;
+    --hairline: #433428; --border: #9a8670;
+    --ink: #f8eedc; --body: #e2d4bc; --muted: #bcaa8f; --faint: #7a6a56;
+    --accent: #e0915e; --accent-fill: #e0915e; --accent-fill-hover: #eaa67a; --accent-fill-press: #cf8049; --accent-edge: #9c5a30;
+    --on-accent: #1e1712; --accent-text: #f0b88f; --accent-wash: #402a1d; --on-accent-wash: #f6d2b8; --focus: #f3c29c;
+    --wood: #a67c52; --wood-2: #6f4f33; --wood-wash: #3a2c20;
+    --sage: #8fa886; --sage-ink: #a9c4a0; --sage-wash: #243020;
+    --ok: #a6c79c; --ok-wash: #243020; --warn: #e3be6c; --warn-wash: #3a2f17; --bad: #f09a92; --bad-wash: #3d2522; --info: #93bde6; --info-wash: #213040;
+    --note-1: #e9d58f; --note-2: #bccdab; --note-3: #e2bfae; --on-note: #2a1e13;
+    --cork: #8a6a48; --cork-2: #77593b;
+    --bulb-a: #ffc873; --bulb-b: #fff0cf; --wire: #9a8670;
+    --kraft: #9a7a4e; --kraft-2: #876840; --kraft-3: #6b5030; --tape: #cdb98c;
+    --scrim: rgba(0, 0, 0, 0.6); --shadow-edge: rgba(0, 0, 0, 0.45); --shadow-soft: rgba(0, 0, 0, 0.4);
+    --lamp-glow: rgba(255, 190, 110, 0.32); --lamp-glow-strong: rgba(255, 190, 110, 0.55);
   }
 }
 :root[data-theme="dark"] {
-  --canvas: #1b1a17; --surface: #252320; --surface-2: #302d28; --raised: #2a2824; --seg-on: #45413a;
-  --hairline: #3a3630; --border: #8b857a;
-  --ink: #f5f1e8; --body: #d9d4c8; --muted: #b0aa9d; --faint: #6f6a60;
-  --coral: #d9856a; --accent-fill: #d9856a; --accent-fill-hover: #e49b83; --accent-fill-press: #c9735a;
-  --on-accent: #1b1a17; --accent-text: #eaa690; --accent-wash: #3b2a23; --on-accent-wash: #f3c9b9; --focus: #f0b49b;
-  --ok: #86c797; --ok-wash: #22332a; --warn: #e0b765; --warn-wash: #372d17; --bad: #f09a92; --bad-wash: #3b2421; --info: #8fbbe6; --info-wash: #1f2e3b;
-  --scrim: rgba(0, 0, 0, 0.6); --overlay-shadow: 0 12px 40px rgba(0, 0, 0, 0.5);
+  --canvas: #1e1712; --surface: #2a2019; --surface-2: #36291f; --raised: #30251c; --seg-on: #4a3b2d;
+  --hairline: #433428; --border: #9a8670;
+  --ink: #f8eedc; --body: #e2d4bc; --muted: #bcaa8f; --faint: #7a6a56;
+  --accent: #e0915e; --accent-fill: #e0915e; --accent-fill-hover: #eaa67a; --accent-fill-press: #cf8049; --accent-edge: #9c5a30;
+  --on-accent: #1e1712; --accent-text: #f0b88f; --accent-wash: #402a1d; --on-accent-wash: #f6d2b8; --focus: #f3c29c;
+  --wood: #a67c52; --wood-2: #6f4f33; --wood-wash: #3a2c20;
+  --sage: #8fa886; --sage-ink: #a9c4a0; --sage-wash: #243020;
+  --ok: #a6c79c; --ok-wash: #243020; --warn: #e3be6c; --warn-wash: #3a2f17; --bad: #f09a92; --bad-wash: #3d2522; --info: #93bde6; --info-wash: #213040;
+  --note-1: #e9d58f; --note-2: #bccdab; --note-3: #e2bfae; --on-note: #2a1e13;
+  --cork: #8a6a48; --cork-2: #77593b;
+  --bulb-a: #ffc873; --bulb-b: #fff0cf; --wire: #9a8670;
+  --kraft: #9a7a4e; --kraft-2: #876840; --kraft-3: #6b5030; --tape: #cdb98c;
+  --scrim: rgba(0, 0, 0, 0.6); --shadow-edge: rgba(0, 0, 0, 0.45); --shadow-soft: rgba(0, 0, 0, 0.4);
+  --lamp-glow: rgba(255, 190, 110, 0.32); --lamp-glow-strong: rgba(255, 190, 110, 0.55);
 }
 :root[data-theme="light"] { color-scheme: light; }
 :root[data-theme="dark"] { color-scheme: dark; }
 
+@media (max-aspect-ratio: 1/1) {
+  :root { --cine-bar: clamp(28px, 5dvh, 48px); }
+}
 @media (min-width: 768px) {
   :root { --section: 32px; --pad-card: 20px; --gutter: 24px; }
 }
 @media (min-width: 1024px) {
-  :root { --fs-display: 40px; --fs-h2: 26px; --gutter: 32px; }
+  :root { --fs-display: 46px; --fs-h2: 30px; --gutter: 32px; }
 }

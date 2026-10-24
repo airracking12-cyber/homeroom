@@ -45,6 +45,8 @@ function SeatMap({ me, cabin, tasks, completions, groups, subjects, onChat }) {
           {filterSubjects.map((s) => <Chip key={s} on={filter === s} onClick={() => setFilter(s)}><i className="dot" style={{ background: subjColor(s) }} />{s} <span className="caption" style={{ color: "inherit" }}>{mateCount(s)}</span></Chip>)}
         </div>
       )}
+      <div className="mates-grid">
+      <div className="stack mates-map">
       <div className="seatmap" style={{ "--per": perRow, "--side": layout }} role="group" aria-label="Seat map of your class">
         {names.flatMap((n, i) => [
           ...(i % perRow === layout ? [<span key={`a${i}`} className="aisle" aria-hidden="true" />] : []),
@@ -64,12 +66,16 @@ function SeatMap({ me, cabin, tasks, completions, groups, subjects, onChat }) {
         ])}
       </div>
       <div className="legend" aria-hidden="true">{Object.entries(ST_WORD).map(([k, l]) => <span key={k} data-st={k}><i className="st-dot" />{l}</span>)}<span><i className="on-dot" />Online</span></div>
+      </div>
+      <div className="stack mates-side">
       <div className="card who" key={who}>
         <div className="between"><div><b className="who-name">{who}{who === me && " (you)"}</b><p className="muted small">{whoSt.total ? `${whoSt.done} of ${whoSt.total} done this week` : "No tasks due this week"}</p></div>
           {who !== me && isOn(who) && <Button variant="primary" size="sm" onClick={() => { Sound.play("pop"); onChat(who); }}><MessageCircle size={15} aria-hidden="true" />Message</Button>}</div>
         <div className="cluster" style={{ marginTop: 10 }}><span className="badge"><i className="dot" style={{ background: isOn(who) ? "var(--ok)" : "var(--faint)" }} />{isOn(who) ? "Online" : "Offline"}</span><span className="badge">{ST_WORD[whoSt.key]}</span>{whoShared && [...whoShared].map((s) => <span key={s} className="badge"><i className="dot" style={{ background: subjColor(s) }} />{s}</span>)}</div>
       </div>
       {myGroups === 0 && <p className="caption">Join a group in the Groups section and your groupmates will show their subject colour here.</p>}
+      </div>
+      </div>
     </section>
   );
 }
@@ -99,7 +105,7 @@ function Groups({ groups, tasks, progress, subjects, defQuarter, onSave, onDelet
         <p className="muted small" style={{ maxWidth: "56ch" }}>A group holds the tasks for one topic in one subject and quarter, like &ldquo;Math Q2: Chapter 4&rdquo;. Everyone in the class sees them.</p>
         <Button variant="primary" onClick={() => open(null)}><Plus size={16} aria-hidden="true" />New group</Button>
       </div>
-      {byQ.length === 0 && <Empty icon={Users} title="No groups yet" action={<Button variant="primary" onClick={() => open(null)}>Make the first group</Button>}>Make one, then pick it when you add a task.</Empty>}
+      {byQ.length === 0 && <Empty icon={Users} title="Nobody has set up a study group yet" action={<Button variant="primary" onClick={() => open(null)}>Make the first group</Button>}>Make one, then pick it when you add a task.</Empty>}
       {byQ.map(([q, list]) => (
         <section key={q} aria-label={`Quarter ${q}`}>
           <h2 className="group-h">Quarter {q}<span className="badge">{list.length}</span></h2>

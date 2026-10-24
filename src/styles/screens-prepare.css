@@ -6,7 +6,7 @@
 .pills.grades { display: grid; grid-template-columns: repeat(auto-fill, minmax(56px, 1fr)); }
 .pill { position: relative; display: block; }
 .pill input { position: absolute; inset: 0; opacity: 0; margin: 0; cursor: pointer; width: 100%; height: 100%; }
-.pill span { display: flex; align-items: center; justify-content: center; min-height: 44px; min-width: 44px; padding: 0 var(--s-4); border: 1px solid var(--border); border-radius: var(--r-pill); color: var(--ink); font-size: var(--fs-small); font-weight: 500; background: transparent; transition: background var(--dur-1) var(--ease), border-color var(--dur-1) var(--ease); }
+.pill span { display: flex; align-items: center; justify-content: center; min-height: 44px; min-width: 44px; padding: 0 var(--s-4); border: 1px solid var(--border); border-radius: var(--r-pill); color: var(--ink); font-size: var(--fs-small); font-weight: 500; background: transparent; }
 .pill input:checked + span { background: var(--accent-fill); border-color: var(--accent-fill); color: var(--on-accent); font-weight: 600; }
 .pill input:focus-visible + span { outline: 2px solid var(--focus); outline-offset: 2px; }
 @media (hover: hover) { .pill:hover input:not(:checked) + span { background: var(--surface-2); } }
@@ -36,3 +36,11 @@ details.week > summary .grow { flex: 1; min-width: 0; }
 .conf-row { display: grid; gap: var(--s-2); }
 .conf-name { display: inline-flex; align-items: center; gap: var(--s-2); font-weight: 600; color: var(--ink); }
 .topics > li { padding: var(--s-1) 0; }
+
+/* the setup wizard keeps its comfortable width; on wide screens a short note sits beside it instead of leaving the page half empty */
+.prep-setup { display: grid; gap: var(--s-5); grid-template-columns: minmax(0, 1fr); }
+.prep-aside { display: none; align-content: start; gap: var(--s-3); }
+@media (min-width: 1024px) {
+  .prep-setup { grid-template-columns: minmax(0, 640px) minmax(260px, 360px); align-items: start; gap: var(--s-6); }
+  .prep-aside { display: grid; }
+}

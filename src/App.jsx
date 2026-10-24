@@ -1,16 +1,15 @@
-// Homeroom, rebuilt. This file only decides which screen you are on: signing in, setting up, the intro, or the app itself.
+// Homeroom, rebuilt. This file only decides which screen you are on: signing in, setting up, the Move-In Day tour, or the app itself.
 // Data lives in app/data.jsx, the screens in app/*, the rules (study, plans, notes) in lib/*. Nothing here is styled.
 import { useState, useEffect, useCallback, useRef, lazy, Suspense } from "react";
 import { supabase, store, notes, loadProfile } from "./lib/services.js";
 import { CONFIRMED } from "./lib/helpers.js";
 import { Sound } from "./lib/sound.js";
-import { readOnboardingFlag, writeOnboardingFlag } from "./onboarding/flag.js";
-import { introNeeded } from "./app/intro/machine.js";
+import { readOnboardingFlag, writeOnboardingFlag, readTourOffered, writeTourOffered } from "./onboarding/flag.js";
+import { tourNeeded, offerNeeded, offerDismissedHere, dismissOfferHere } from "./app/tour/machine.js";
 import ErrorBoundary from "./ErrorBoundary.jsx";
 import { ToastProvider, useToast, Dots } from "./app/ui.jsx";
 import { useAppearance } from "./app/prefs.js";
 import { useRoute } from "./app/router.js";
-import { ShellCtx } from "./app/shell-context.js";
 import { DataProvider } from "./app/data.jsx";
 import { Auth, ResetPassword, Registered, ClassGate, ProfileSetup, Wordmark, joinCode, codeError } from "./app/auth.jsx";
 import Shell from "./app/shell.jsx";
@@ -19,12 +18,15 @@ import Review from "./app/review/Review.jsx";
 import Prepare from "./app/prepare/Prepare.jsx";
 import ClassScreen from "./app/class/Class.jsx";
 import Settings from "./app/settings/Settings.jsx";
-import Intro from "./app/intro/Intro.jsx";
+import Room from "./app/room/Room.jsx";
 import { clearDraft } from "./app/track/parts.jsx";
 import "./styles/tokens.css";
 import "./styles/base.css";
 import "./styles/components.css";
 import "./styles/layout.css";
+import "./styles/motion.css";
+import "./styles/room.css";
+import "./styles/cinema.css";
 import "./styles/screens-auth.css";
 import "./styles/screens-track.css";
 import "./styles/screens-review.css";
@@ -39,17 +41,20 @@ const Splash = () => (
   <main className="auth" id="main" aria-busy="true"><div className="center-col"><Wordmark /><p className="muted" role="status">Opening Homeroom<Dots /></p></div></main>
 );
 
-// The signed-in app: the shell around one destination at a time. The intro takes the whole screen while it is open.
-function Signed({ appearance, introOpen, setIntroOpen, onSignOut, onChangeClass, onDeleted, user }) {
+// The signed-in app: the shell around one destination at a time. The Move-In Day tour runs on top of the real app.
+function Signed({ appearance, tourOpen, setTourOpen, offerOpen, setOfferOpen, onSignOut, onChangeClass, onDeleted, user }) {
   const { route, go, back } = useRoute();
-  const closeIntro = useCallback(async () => { setIntroOpen(false); await writeOnboardingFlag(supabase, true); }, [setIntroOpen]);
-  if (introOpen) return <ShellCtx.Provider value={{ go, route }}><Intro user={user} onClose={closeIntro} /></ShellCtx.Provider>;
+  // finishing or skipping only records that the tour is over: it never changes anything the student saved
+  const closeTour = useCallback(async () => { setTourOpen(false); setOfferOpen(false); dismissOfferHere(user); await Promise.all([writeOnboardingFlag(supabase, true), writeTourOffered(supabase)]); }, [setTourOpen, setOfferOpen, user]);
+  const dismissOffer = useCallback(async () => { setOfferOpen(false); dismissOfferHere(user); await writeTourOffered(supabase); }, [setOfferOpen, user]);
+  const takeOffer = useCallback(() => { setOfferOpen(false); setTourOpen(true); }, [setOfferOpen, setTourOpen]);
   const screens = {
+    room: <Room />,
     track: <Track />, review: <Review />, prepare: <Prepare />, class: <ClassScreen />,
-    settings: <Settings appearance={appearance} onSignOut={onSignOut} onChangeClass={onChangeClass} onReplayIntro={() => setIntroOpen(true)} onDeleted={onDeleted} />,
+    settings: <Settings appearance={appearance} onSignOut={onSignOut} onChangeClass={onChangeClass} onReplayTour={() => setTourOpen(true)} onDeleted={onDeleted} />,
   };
   return (
-    <Shell route={route} go={go} back={back}>
+    <Shell route={route} go={go} back={back} appearance={appearance} tour={{ open: tourOpen, onClose: closeTour }} offer={{ open: offerOpen && !tourOpen, take: takeOffer, dismiss: dismissOffer }}>
       <ErrorBoundary inline resetKey={route.dest}>{screens[route.dest]}</ErrorBoundary>
     </Shell>
   );
@@ -65,9 +70,10 @@ function Root() {
   const [classId, setClassId] = useState(null);
   const [classes, setClasses] = useState([]);
   const [needProfile, setNeedProfile] = useState(false);
-  const [introOpen, setIntroOpen] = useState(false);
+  const [tourOpen, setTourOpen] = useState(false);
+  const [offerOpen, setOfferOpen] = useState(false);
   const appearance = useAppearance(ready && !!user);
-  const introChecked = useRef(false);
+  const tourChecked = useRef(false);
 
   useEffect(() => {
     const { data } = supabase.auth.onAuthStateChange((event) => { if (event === "PASSWORD_RECOVERY") setRecovering(true); });
@@ -89,11 +95,17 @@ function Root() {
     })();
   }, []);
 
-  // someone who started the intro but never finished it is sent back into it, on any device. Older accounts have no flag and are left alone.
+  // someone who started the Move-In Day tour but never finished it is sent back into it, on any device. Older accounts have no flag and are left alone.
   useEffect(() => {
-    if (!user || !classId || isAdmin || introChecked.current) return;
-    introChecked.current = true;
-    readOnboardingFlag(supabase).then((flag) => { if (introNeeded(flag)) setIntroOpen(true); });
+    if (!user || !classId || isAdmin || tourChecked.current) return;
+    tourChecked.current = true;
+    (async () => {
+      const flag = await readOnboardingFlag(supabase);
+      if (tourNeeded(flag)) { setTourOpen(true); return; }
+      // everyone else is only OFFERED the tour, once, and can dismiss it; saying no never changes anything
+      const offered = await readTourOffered(supabase);
+      if (offerNeeded({ flag, offered, dismissedHere: offerDismissedHere(user) })) setOfferOpen(true);
+    })();
   }, [user, classId, isAdmin]);
 
   const onAuthed = async (u, cid, admin) => {
@@ -109,9 +121,9 @@ function Root() {
       return "We couldn't save your profile: " + error.message + " Try again in a moment.";
     }
     joinCode.value = "";
-    await writeOnboardingFlag(supabase, false); // "in the intro" from this moment, until it is finished
-    introChecked.current = true;
-    setNeedProfile(false); setIntroOpen(true);
+    await writeOnboardingFlag(supabase, false); // "in the tour" from this moment, until it is finished
+    tourChecked.current = true;
+    setNeedProfile(false); setTourOpen(true);
     await onAuthed(u, cid, false);
     return null;
   };
@@ -128,7 +140,7 @@ function Root() {
     clearDraft();
     await supabase.auth.signOut();
     Sound.stopMusic(); notes.clear();
-    setUser(null); setIsAdmin(false); setClassId(null); setIntroOpen(false); introChecked.current = false;
+    setUser(null); setIsAdmin(false); setClassId(null); setTourOpen(false); setOfferOpen(false); tourChecked.current = false;
   };
   const afterDelete = () => {
     try {
@@ -137,7 +149,7 @@ function Root() {
     } catch (err) { console.warn("[Homeroom] non-fatal:", err); }
     supabase.auth.signOut().catch(() => {});
     notes.clear(); Sound.stopMusic();
-    setUser(null); setIsAdmin(false); setClassId(null); setIntroOpen(false); introChecked.current = false;
+    setUser(null); setIsAdmin(false); setClassId(null); setTourOpen(false); setOfferOpen(false); tourChecked.current = false;
   };
 
   if (registered) return <Registered onGo={() => { window.history.replaceState(null, "", window.location.pathname); setRegistered(false); }} />;
@@ -149,7 +161,7 @@ function Root() {
   if (!classId) return <ClassGate classes={classes} setClasses={setClasses} onChoose={chooseClass} />;
   return (
     <DataProvider key={`${user}:${classId}`} user={user} classId={classId} setClassId={setClassId} classes={classes} setClasses={setClasses} isAdmin={isAdmin}>
-      <Signed user={user} appearance={appearance} introOpen={introOpen} setIntroOpen={setIntroOpen} onSignOut={signOut} onChangeClass={() => setClassId(null)} onDeleted={afterDelete} />
+      <Signed user={user} appearance={appearance} tourOpen={tourOpen} setTourOpen={setTourOpen} offerOpen={offerOpen} setOfferOpen={setOfferOpen} onSignOut={signOut} onChangeClass={() => setClassId(null)} onDeleted={afterDelete} />
     </DataProvider>
   );
 }

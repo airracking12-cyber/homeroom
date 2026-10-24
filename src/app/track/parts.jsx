@@ -9,7 +9,7 @@ import { callClaude, streamClaude, parseJSON } from "../../lib/ai.js";
 import { statusLabel } from "../../lib/constants.js";
 import { mmss } from "../../lib/hooks.js";
 import { Sound } from "../../lib/sound.js";
-import { Button, Chip, Segmented, Field, Banner, Dots, Spinner, cx } from "../ui.jsx";
+import { Button, Chip, Segmented, Field, Banner, Dots, cx } from "../ui.jsx";
 
 /* ── one task ── */
 export function TaskRow({ t, status, finished, groupName, onOpen, onToggle, selected }) {
@@ -109,7 +109,7 @@ function QuickAdd({ subjects, onFill }) {
       <div className="quick-body">
         <div className="row-inline">
           <input className="input" aria-label="Describe the task in one sentence" value={q} onChange={(e) => setQ(e.target.value)} placeholder="math quiz friday, chapter 2" onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); go(); } }} />
-          <Button onClick={go} disabled={!q.trim() || busy} aria-label="Fill the form from this sentence">{busy ? <Spinner /> : "Fill in"}</Button>
+          <Button onClick={go} disabled={!q.trim() || busy} aria-label="Fill the form from this sentence">{busy ? <>Reading<Dots /></> : "Fill in"}</Button>
         </div>
         {err && <p className="error" role="alert">{err}</p>}
       </div>
@@ -336,7 +336,7 @@ export function FocusPanel({ timer }) {
     <div className="stack" style={{ justifyItems: "center", textAlign: "center" }}>
       <Segmented label="Timer length" value={timer.mode} options={modes} onChange={(m) => timer.reset(m)} />
       <p className="timer-readout display" role="timer" aria-label={`${mmss(timer.left)} left`}>{mmss(timer.left)}</p>
-      <div className="bar" style={{ width: "100%", maxWidth: 320 }} aria-hidden="true"><i style={{ width: `${Math.round(pct * 100)}%` }} /></div>
+      <div className="bar" style={{ width: "100%", maxWidth: 320 }} aria-hidden="true"><i style={{ transform: `scaleX(${Math.round(pct * 100) / 100})` }} /></div>
       <div className="cluster" style={{ justifyContent: "center" }}>
         {timer.running ? <Button variant="primary" size="lg" onClick={timer.pause}><Pause size={18} aria-hidden="true" />Pause</Button> : <Button variant="primary" size="lg" onClick={timer.start}><Play size={18} aria-hidden="true" />{timer.left < timer.total ? "Resume" : "Start"}</Button>}
         <Button size="lg" onClick={() => timer.reset()}><RotateCcw size={16} aria-hidden="true" />Reset</Button>

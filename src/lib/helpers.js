@@ -59,18 +59,6 @@ export async function imageToJpegBase64(file) {
   return c.toDataURL("image/jpeg", 0.85).split(",")[1];
 }
 
-export async function extractFromFile(file) {
-  const system = "You turn study material into clean study notes. Plain text only, no markdown symbols, no emojis. Keep headings and lists as plain lines. Describe diagrams or tables briefly in words. Keep the result under 650 words, condensing if the source is long, and keep every important fact, term, formula and date.";
-  let block;
-  if (file.type === "application/pdf" || /\.pdf$/i.test(file.name)) {
-    const data = (await readAsDataURL(file)).split(",")[1];
-    block = { type: "document", source: { type: "base64", media_type: "application/pdf", data } };
-  } else {
-    block = { type: "image", source: { type: "base64", media_type: "image/jpeg", data: await imageToJpegBase64(file) } };
-  }
-  return callClaude(system, [{ role: "user", content: [block, { type: "text", text: "Turn this into study notes." }] }]);
-}
-
 export function buildContext(tasks, materials, progress, user, found) {
   const list = tasks
     .map((t) => `[${t.id}] ${t.title} | subject: ${t.subject} | type: ${t.type} | priority: ${t.priority} | due ${t.deadline} (${parse(t.deadline).toLocaleDateString("en-US", { weekday: "long" })}) | ${user}'s status: ${statusLabel(progress[t.id])} | notes: ${t.notes || "none"} | added by ${t.addedBy}`)
@@ -85,3 +73,5 @@ export function buildContext(tasks, materials, progress, user, found) {
   return { today: todayLong(), list: list || "(no tasks yet)", mats: mats || "(no review material yet)" };
 }
 
+// a name as it is said to the person: usernames are lowercase, a greeting is not ("mika" -> "Mika")
+export const nice = (name) => { const n = String(name || "").trim(); return n ? n[0].toUpperCase() + n.slice(1) : n; };

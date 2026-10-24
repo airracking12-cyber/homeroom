@@ -84,16 +84,24 @@ test("a note's text is fetched when asked for, once, in small groups", async () 
   assert.equal(db.calls.filter((c) => c.op === "select").length, 3); // held now, nothing more to fetch
 });
 
-test("add stores the note (capped, as the signed-in person) and remembers its text", async () => {
+test("add stores the note exactly as given (as the signed-in person) and remembers its text", async () => {
   const db = fakeDb();
   const notes = createNotes(db.client);
-  assert.equal(await notes.add({ id: "x1", classId: "c1", author: "ana", subject: "Science", topic: "  Cells ", title: "T", text: "a".repeat(MAX_BODY + 50), kind: "upload", taskId: "t9" }), true);
+  const body = "b".repeat(MAX_BODY);
+  assert.equal(await notes.add({ id: "x1", classId: "c1", author: "ana", subject: "Science", topic: "  Cells ", title: "T", text: body, kind: "upload", taskId: "t9" }), true);
   const saved = db.tables.notes[0];
-  assert.equal(saved.body.length, MAX_BODY);
+  assert.equal(saved.body, body, "the text is saved unchanged, right up to the cap");
   assert.equal(saved.topic, "Cells");
   assert.equal(saved.task_id, "t9");
   assert.equal("owner" in saved, false); // the database fills in who the owner is
   assert.equal((await notes.text(["x1"])).x1.length, MAX_BODY);
+});
+
+test("add never cuts a note silently: over the cap it refuses (the reader splits long text into numbered parts first)", async () => {
+  const db = fakeDb();
+  const notes = createNotes(db.client);
+  assert.equal(await notes.add({ id: "x2", classId: "c1", author: "ana", subject: "Science", title: "T", text: "a".repeat(MAX_BODY + 1), kind: "upload" }), false);
+  assert.equal((db.tables.notes || []).length, 0, "nothing half-saved");
 });
 
 test("add reports failure instead of pretending", async () => {
